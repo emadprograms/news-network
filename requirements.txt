@@ -1,1 +1,3 @@
 streamlit
+libsql-client
+python-dateutil
