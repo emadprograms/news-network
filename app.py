@@ -121,13 +121,13 @@ def clean_content(content_list):
     return paragraphs
 
 
-# --- SIDEBAR & FILTER ---
-# Place Sidebar UI setup first, but we need date/time inputs to do the fetch.
-# Strategy: Render Time inputs first -> Fetch Data -> Render Export & Rest of Sidebar
-
-with st.sidebar:
-    st.header("🕰️ Time Machine")
+# --- CONTROL PANEL ---
+with st.expander("🎛️ Control Panel (Time, Filters & Export)", expanded=False):
+    # 1. TIME MACHINE
+    st.subheader("🕰️ Time Machine")
     use_time_travel = st.checkbox("Enable Time Filter", value=False)
+    
+    start_date, end_date = None, None # defaults
     
     if use_time_travel:
         col_start_d, col_start_t = st.columns(2)
@@ -144,126 +144,89 @@ with st.sidebar:
         
         st.info("Displaying news strictly within this window.")
 
-# --- FETCH DATA ---
-# (Executed BEFORE Export section logic)
-if db:
-    if use_time_travel and start_date and end_date:
-        # Construct ISO Strings
-        dt_start = datetime.datetime.combine(start_date, start_time)
-        dt_end = datetime.datetime.combine(end_date, end_time)
-        iso_start = dt_start.isoformat()
-        iso_end = dt_end.isoformat()
-        
-        news_items = db.fetch_news_range(iso_start, iso_end)
-        st.caption(f"Found {len(news_items)} reports between {iso_start} and {iso_end}")
-    else:
-        # Default: Fetch EVERYTHING from Today (or last active day)
-        # This ensures export includes Macro + Stocks + Company, not just last 50 items.
-        today = datetime.date.today()
-        news_items = db.fetch_news_by_date(today)
-        st.caption(f"Showing all events for Today ({today})")
-
-else:
-    news_items = []
-
-if not news_items:
-    st.info("No news found for today. (Try running the Hunter in 'app' or check the Time Machine)")
-    st.stop()
-
-# --- EXPORT SECTION ---
-with st.sidebar:
-
-
+    # 2. DATA FETCH (Inside Expander to show status)
     st.divider()
-    
-    # --- SOURCE FILTER ---
-    st.header("🔍 Source Filter")
-    if 'news_items' in locals() and news_items:
-        # distinct publishers
-        all_pubs = sorted(list(set([n.get('publisher', 'Unknown') for n in news_items])))
-        
-        # Default: Select All
-        selected_pubs = st.multiselect(
-            "Select Publishers",
-            options=all_pubs,
-            default=all_pubs
-        )
-        
-        # Apply Filter
-        news_items = [n for n in news_items if n.get('publisher', 'Unknown') in selected_pubs]
-        st.caption(f"Showing {len(news_items)} articles from {len(selected_pubs)} publishers.")
-    else:
-        st.info("Load data to see filters.")
-
-    st.divider()
-    
-    # --- EXPORT SETTINGS ---
-    st.header("📋 Export Options")
-    
-    # Define Category Groups
-    macro_cats = ['MACRO', 'FED', 'INDICATORS', 'TREASURY', 'ECONOMY_GROWTH', 'ENERGY', 'COMMODITIES', 'GEO_POLITICS', 'FX', 'ECONOMY', 'GEO', 'MARKETS', 'GLOBAL']
-    stock_cats = ['STOCKS', 'EQUITIES', 'EARNINGS', 'IPO', 'ANALYST_RATINGS', 'MERGERS', 'MERGERS_ACQUISITIONS', 'DIVIDENDS', 'BUYBACKS', 'INSIDER_MOVES', 'GUIDANCE', 'CONTRACTS', 'FDA', 'LEGAL', 'MANAGEMENT', 'SECTOR_NEWS']
-    # Company is anything else
-    
-    export_options = ["MACRO", "STOCKS", "COMPANY"]
-    selected_export_cats = st.multiselect(
-        "Select Categories to Export",
-        options=export_options,
-        default=export_options
-    )
-    
-    with st.expander("📥 Generate Report", expanded=True):
-        if 'news_items' in locals() and news_items:
-            # Filter Items based on Selection
-            final_export_items = []
+    if db:
+        if use_time_travel and start_date and end_date:
+            # Construct ISO Strings
+            dt_start = datetime.datetime.combine(start_date, start_time)
+            dt_end = datetime.datetime.combine(end_date, end_time)
+            iso_start = dt_start.isoformat()
+            iso_end = dt_end.isoformat()
             
-            for item in news_items:
+            news_items = db.fetch_news_range(iso_start, iso_end)
+            st.caption(f"Found {len(news_items)} reports between {iso_start} and {iso_end}")
+        else:
+            # Default: Fetch EVERYTHING from Today (or last active day)
+            today = datetime.date.today()
+            news_items = db.fetch_news_by_date(today)
+            st.caption(f"Showing all events for Today ({today})")
+    else:
+        news_items = []
+
+    if not news_items:
+        st.warning("No news found. Try adjusting the filters.")
+        
+    # 3. FILTERS & EXPORT
+    if news_items:
+        st.divider()
+        st.subheader("📋 Filter & Export")
+        
+        col_filter, col_export = st.columns(2)
+        
+        with col_filter:
+            st.markdown("**Source Filter**")
+            all_pubs = sorted(list(set([n.get('publisher', 'Unknown') for n in news_items])))
+            selected_pubs = st.multiselect("Select Publishers", options=all_pubs, default=all_pubs)
+            # Apply Filter immediately
+            news_items = [n for n in news_items if n.get('publisher', 'Unknown') in selected_pubs]
+            st.caption(f"Showing {len(news_items)} after source filter.")
+
+        with col_export:
+             st.markdown("**Export Options**")
+             macro_cats = ['MACRO', 'FED', 'INDICATORS', 'TREASURY', 'ECONOMY_GROWTH', 'ENERGY', 'COMMODITIES', 'GEO_POLITICS', 'FX', 'ECONOMY', 'GEO', 'MARKETS', 'GLOBAL']
+             stock_cats = ['STOCKS', 'EQUITIES', 'EARNINGS', 'IPO', 'ANALYST_RATINGS', 'MERGERS', 'MERGERS_ACQUISITIONS', 'DIVIDENDS', 'BUYBACKS', 'INSIDER_MOVES', 'GUIDANCE', 'CONTRACTS', 'FDA', 'LEGAL', 'MANAGEMENT', 'SECTOR_NEWS']
+             export_options = ["MACRO", "STOCKS", "COMPANY"]
+             selected_export_cats = st.multiselect("Export Categories", options=export_options, default=export_options)
+
+             # Generate Text
+             final_export_items = []
+             for item in news_items:
                 cat = item.get('category', 'GENERAL')
-                group = "COMPANY" # Default
-                
+                group = "COMPANY"
                 if cat in macro_cats: group = "MACRO"
                 elif cat in stock_cats: group = "STOCKS"
-                
                 if group in selected_export_cats:
                     final_export_items.append(item)
             
-            if not final_export_items:
-                st.warning("No items match your selected categories.")
-            else:
-                # Generate Text Blob
+             if final_export_items:
                 export_lines = []
                 export_lines.append(f"# Market Intelligence Report ({len(final_export_items)} items)")
                 export_lines.append(f"Categories: {', '.join(selected_export_cats)}")
                 if use_time_travel:
                     export_lines.append(f"Time Window: {start_time} to {end_time}")
                 export_lines.append("---")
-                
                 for item in final_export_items:
                     cat = item.get('category', 'GENERAL')
                     time_str = item.get('time', 'N/A')
                     title = item.get('title', 'No Title')
                     pub = item.get('publisher', 'Unknown')
-                    # Full content for AI context
                     full_body = "\n".join(clean_content(item.get('content', [])))
-                    
                     export_lines.append(f"[{time_str}] ({cat}) {title} [{pub}]")
                     export_lines.append(f"{full_body}\n")
-                
                 final_text = "\n".join(export_lines)
                 
-                # Button for Download (Better for large files)
                 st.download_button(
-                    label=f"📥 Download Report ({len(final_export_items)} items)",
+                    label=f"📥 Download ({len(final_export_items)})",
                     data=final_text,
-                    file_name=f"market_intel_{'_'.join(selected_export_cats)}_{datetime.date.today()}.txt",
+                    file_name=f"market_intel_{datetime.date.today()}.txt",
                     mime="text/plain"
                 )
                 
-                # Preview / Copy Block
-                st.caption("👇 Click the Copy icon in the top-right of this block:")
+        # Copy Block (Full Width)
+        if 'final_text' in locals():
+            with st.expander("Preview / Copy Report"):
                 st.code(final_text, language="markdown")
-        else:
-            st.warning("No news loaded to export.")
 
 
 # --- TICKER ---
