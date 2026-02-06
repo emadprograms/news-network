@@ -1,3 +1,4 @@
 streamlit
 libsql-client
 python-dateutil
+infisicalsdk

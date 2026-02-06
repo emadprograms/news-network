@@ -58,24 +58,41 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- INIT DB ---
-db = None
+from infisical_sdk import InfisicalSDKClient
 
-# Prioritize the specific News DB, fallback to generic
-if "turso_news" in st.secrets:
-    try:
-        db_url = st.secrets["turso_news"]["db_url"].replace("libsql://", "https://")
-        db_token = st.secrets["turso_news"]["auth_token"]
-        db = NewsDatabase(db_url, db_token)
-    except:
-        st.error("News Database Connection Failed")
-elif "turso" in st.secrets:
-    try:
-        db_url = st.secrets["turso"]["db_url"].replace("libsql://", "https://")
-        db_token = st.secrets["turso"]["auth_token"]
-        db = NewsDatabase(db_url, db_token)
-    except:
-        st.error("Legacy Database Connection Failed")
+# --- INIT INFISICAL ---
+try:
+    infisical_secrets = st.secrets["infisical"]
+    infisical = InfisicalSDKClient(host="https://app.infisical.com")
+    
+    infisical.auth.universal_auth.login(
+        client_id=infisical_secrets["client_id"],
+        client_secret=infisical_secrets["client_secret"]
+    )
+    
+    # Fetch Turso Secrets
+    # Assuming environment 'dev' and project id from secrets.toml
+    db_url_secret = infisical.secrets.get_secret_by_name(
+        secret_name="turso_emadarshadalam_newsdatabase_DB_URL",
+        project_id=infisical_secrets["project_id"],
+        environment_slug="dev",
+        secret_path="/"
+    ).secretValue
+    
+    db_token_secret = infisical.secrets.get_secret_by_name(
+        secret_name="turso_emadarshadalam_newsdatabase_AUTH_TOKEN",
+        project_id=infisical_secrets["project_id"],
+        environment_slug="dev",
+        secret_path="/"
+    ).secretValue
+
+    db = NewsDatabase(
+        db_url_secret.replace("libsql://", "https://"),
+        db_token_secret
+    )
+except Exception as e:
+    st.error(f"Failed to fetch secrets from Infisical: {e}")
+    db = None
 
 # --- HEADER ---
 st.title("🌐 GRANDMASTER NEWS NETWORK")
