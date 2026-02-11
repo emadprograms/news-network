@@ -505,7 +505,15 @@ if submitted:
                     # OPTIMIZATION: Transform JSON to Dense Text
                     optimized_text = optimize_json_for_synthesis(all_extracted_items)
                     
+                    # TOKEN SAVINGS CALCULATION
+                    raw_json_str = json.dumps(all_extracted_items)
+                    raw_tokens = km.estimate_tokens(raw_json_str) if km else 0
+                    opt_tokens = km.estimate_tokens(optimized_text) if km else 0
+                    savings = raw_tokens - opt_tokens
+                    savings_pct = (savings / raw_tokens * 100) if raw_tokens > 0 else 0
+                    
                     with st.expander("🔍 View Optimized Token-Light Input (For AI Analysis)", expanded=False):
+                        st.info(f"✨ **Token Savings**: Reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
                         st.text(optimized_text)
                     
                     final_prompt = f"""
@@ -531,7 +539,7 @@ if submitted:
                     
                     with st.spinner("🤖 Writing Final Report..."):
                          # We use a separate key/call for this to ensure we have quota
-                        final_res = gemini_client.generate_content(final_prompt)
+                        final_res = ai_client.generate_content(final_prompt, config_id=selected_model)
                         if final_res['success']:
                             st.markdown("### 📝 Consolidated Market Analysis")
                             st.markdown(final_res['content'])
