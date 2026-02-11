@@ -6,6 +6,7 @@ from modules.db_client import NewsDatabase
 from modules.key_manager import KeyManager
 from modules.llm_client import GeminiClient
 from infisical_sdk import InfisicalSDKClient
+import json
 
 # --- CONFIG ---
 st.set_page_config(page_title="News Network", page_icon="📰", layout="wide")
@@ -177,42 +178,56 @@ def build_prompt_from_items(items, system_instruction):
         
     return f"{system_instruction}\n\n=== MARKET DATA ===\n{context_blob}"
 
-def build_chunk_prompt(chunk, index, total, system_instruction, previous_findings=None):
-    """Builds a prompt for a specific chunk with explicit Part X of Y instructions."""
-    if total == 1:
-        return build_prompt_from_items(chunk, system_instruction)
-    
-    # index is 0-based, total is count. Example: index 0 of 2 is NOT last.
-    is_last_part = (index + 1) == total
-    
-    if is_last_part:
-        # FINAL PART PROMPT
-        history_text = ""
-        if previous_findings:
-            history_text = "\n\n=== PREVIOUS FINDINGS (Do not repeat, just synthesize) ===\n" + "\n---\n".join(previous_findings)
+def build_chunk_prompt(chunk, index, total, market_data_text):
+    """
+    STRICT DATA ETL PROMPT - V1
+    Forces JSON output for machine-readable datasets.
+    """
+    prompt = f"""SYSTEM NOTICE: This is PART {index+1} of {total}.
 
-        system_notice = (
-            f" SYSTEM NOTICE: This is PART {index+1} of {total} (FINAL PART).\n"
-            f" INSTRUCTIONS:\n"
-            f" 1. Analyze this final dataset.\n"
-            f" 2. Combine findings from this part with the PREVIOUS FINDINGS provided below.\n"
-            f" 3. GENERATE THE FINAL COMPREHENSIVE REPORT NOW.\n"
-            f" {system_instruction}"
-            f"{history_text}"
-        )
-    else:
-        # INTERMEDIATE PART PROMPT (Stealth Extraction)
-        system_notice = (
-            f" SYSTEM NOTICE: This is PART {index+1} of {total}.\n"
-            f" INSTRUCTIONS:\n"
-            f" 1. Analyze this partial dataset.\n"
-            f" 2. EXTRACT detailed findings into a block labeled [[MEMORY_BLOCK]]. This is for internal use.\n"
-            f" 3. OUTSIDE the block, simply acknowledge receipt: 'Received Part {index+1} of {total}, ready for next part.'\n"
-            f" 4. Do NOT generate a final analysis yet.\n"
-            f" {system_instruction}"
-        )
-        
-    return build_prompt_from_items(chunk, system_notice)
+*** ROLE ***
+You are a high-fidelity Data Extraction Engine. Your sole purpose is to convert unstructured news text into a structured, machine-readable JSON dataset. You have ZERO creative license. You must not analyze, correlate, or summarize beyond the explicit facts provided in the text.
+
+*** STRICT CONSTRAINTS ***
+1. NO CORRELATION: Do not link separate stories unless the text explicitly links them.
+2. NO EXTERNAL KNOWLEDGE: Extract only what is in the provided text.
+3. NO SYNTHESIS: Do not merge distinct events into a general narrative. Keep them as discrete data objects.
+4. DEDUPLICATION: If a story appears multiple times (e.g., across different news wires), extract data only from the most detailed version and ignore the rest.
+5. RAW DATA PRIORITY: Prioritize preserving specific numbers (tickers, prices, % changes, revenue, EPS, deal sizes). Do not round these numbers.
+6. TRUNCATION HANDLING: If the text chunk ends in the middle of a story, extract what is visible and mark the entry as "TRUNCATED" so the next system knows to look for the rest.
+
+*** OUTPUT FORMAT ***
+You must output a valid JSON object containing a list of items. Use the following schema structure:
+
+{{
+  "news_items": [
+    {{
+      "category": "String (Choose one: EARNINGS, MERGERS_ACQUISITIONS, MACRO_ECONOMY, MARKET_MOVEMENTS, GEOPOLITICS, EXECUTIVE_MOVES, OTHER)",
+      "primary_entity": "String (Company Name or Ticker or Country)",
+      "secondary_entities": ["Array of Strings (Other involved parties)"],
+      "event_summary": "String (Concise, factual, one-sentence description of the event)",
+      "hard_data": {{
+        "key_metric_1": "value",  // e.g., "Revenue": "$12.4B"
+        "key_metric_2": "value"   // e.g., "EPS": "$1.20"
+      }},
+      "guidance_or_forecast": "String (Only if explicitly stated in text)",
+      "quotes": ["Array of Strings (Direct quotes from key figures)"],
+      "sentiment_indicated": "String (Only if explicitly stated, e.g., 'Analyst upgraded to Buy')",
+      "is_truncated": Boolean
+    }}
+  ]
+}}
+
+*** INSTRUCTIONS ***
+1. Process the provided partial dataset.
+2. Extract every distinct news event into the JSON format defined above.
+3. If no hard data exists for a field, leave it null or empty.
+4. Do not output any conversational text before or after the JSON block. Start with '{{' and end with '}}'.
+
+=== MARKET DATA STARTS BELOW ===
+{market_data_text}
+"""
+    return prompt
 
 
 # ==============================================================================
@@ -257,26 +272,25 @@ with st.container():
         
         st.divider()
 
-        # ROW 2: AI Configuration
-        st.markdown("**2. AI Configuration**")
+        # ROW 2: Model Configuration
+        st.markdown("**2. AI Extraction Configuration**")
         col_ai1, col_ai2 = st.columns([3, 1])
         
         with col_ai1:
-            default_sys = (
-                "You are a master financial analyst. Review the provided news items and generate a strategic market summary.\n"
-                "Identify key trends, correlation between assets, and potential market moving events.\n"
-                "Format the output as a professional briefing."
+            st.info(
+                "💡 **Structured ETL Mode Active**: The system is forced into a high-fidelity data extraction role. "
+                "It will output a machine-readable JSON dataset containing earnings, macroEvents, and market movements."
             )
-            system_instruction = st.text_area("System Instruction", value=default_sys, height=100)
             
         with col_ai2:
             if km:
                  model_options = list(km.MODELS_CONFIG.keys())
                  ix = 0
+                 # default to flash-paid if available for speed/cost balance
                  if 'gemini-2.0-flash-paid' in model_options:
                      ix = model_options.index('gemini-2.0-flash-paid')
-                 elif 'gemini-2.5-flash-free' in model_options:
-                     ix = model_options.index('gemini-2.5-flash-free')
+                 elif 'gemini-1.5-flash-paid' in model_options:
+                     ix = model_options.index('gemini-1.5-flash-paid')
                  selected_model = st.selectbox("Select Model", options=model_options, index=ix)
             else:
                 st.error("Keys unavailable")
@@ -287,12 +301,12 @@ with st.container():
         # ROW 3: Execution Mode
         col_exec, col_btn = st.columns([3, 1])
         with col_exec:
-             mode = st.radio("Execution Mode", ["🚀 Run Analysis (Fetch + AI)", "🧪 Dry Run (Fetch + Build Prompt Only)"], horizontal=True)
+             mode = st.radio("Extraction Mode", ["🚀 RUN ETL (Full Extraction)", "🧪 DRY RUN (Test Prompts Only)"], horizontal=True)
         
         with col_btn:
             st.write("") 
             st.write("") 
-            submitted = st.form_submit_button("▶️ EXECUTE WORKFLOW", type="primary")
+            submitted = st.form_submit_button("▶️ START EXTRACTION", type="primary")
 
 # 3. EXECUTION LOGIC
 if submitted:
@@ -327,94 +341,105 @@ if submitted:
         if "Dry Run" in mode:
             prompts = []
             for i, chunk in enumerate(chunks):
-                # Use the shared helper to get exact prompt
-                p = build_chunk_prompt(chunk, i, len(chunks), system_instruction)
+                # Build context for display
+                context_for_prompt = ""
+                for item in chunk:
+                    t = item.get('time', 'N/A')
+                    title = item.get('title', 'No Title')
+                    body = " ".join(clean_content(item.get('content', [])))
+                    context_for_prompt += f"[{t}] {title}\n{body}\n\n"
+                    
+                p = build_chunk_prompt(chunk, i, len(chunks), context_for_prompt)
                 prompts.append(p)
             st.session_state['dry_run_prompts'] = prompts
-            st.toast(f"Dry Run Complete: {len(prompts)} prompts built.")
+            st.toast(f"Dry Run Complete: {len(prompts)} ETL prompts built.")
             
         else:
             # Run AI
             if not ai_client:
                 st.error("AI Client unavailable.")
             else:
-                final_output = ""
-                previous_findings = []
+                import json
+                all_extracted_items = []
                 last_idx = len(chunks) - 1
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # --- LIVE LOGS ---
-                log_expander = st.expander("🛠️ Live Execution Logs", expanded=True)
+                # --- LIVE ETL LOGS ---
+                log_expander = st.expander("🛠️ Live ETL Logs", expanded=True)
                 log_container = log_expander.container()
 
                 for i, chunk in enumerate(chunks):
-                    # 1. Build Prompt (Intermediate vs Final)
-                    p = build_chunk_prompt(chunk, i, len(chunks), system_instruction, previous_findings)
+                    # 1. Build context for this chunk
+                    context_for_prompt = ""
+                    for item in chunk:
+                        t = item.get('time', 'N/A')
+                        title = item.get('title', 'No Title')
+                        body = " ".join(clean_content(item.get('content', [])))
+                        context_for_prompt += f"[{t}] {title}\n{body}\n\n"
+
+                    p = build_chunk_prompt(chunk, i, len(chunks), context_for_prompt)
                     
-                    status_msg = f"Processing Part {i+1}/{len(chunks)}..."
-                    if i == last_idx:
-                        status_msg = "🏆 Synthesizing Final Report..."
-                    
+                    status_msg = f"Extracting Data Part {i+1}/{len(chunks)}..."
                     progress_bar.progress((i) / (len(chunks) if len(chunks) > 0 else 1))
                     
                     # 2. Execute with Relentless Rotation & Retry
                     attempt = 0
-                    with st.spinner(f"AI Analyst: {status_msg}"):
+                    with st.spinner(f"ETL Engine: {status_msg}"):
                         while True:
                             attempt += 1
-                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Requesting...")
+                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Extraction in progress...")
                             
                             res = ai_client.generate_content(p, config_id=selected_model)
                             
                             if res['success']:
                                 content = res['content']
                                 key_used = res.get('key_name', 'Unknown')
-                                log_container.success(f"✅ [Part {i+1}] Success using '{key_used}'.")
                                 
-                                if i < last_idx:
-                                    # Intermediate: Extract findings from [[MEMORY_BLOCK]]
-                                    memory_match = re.search(r"\[\[MEMORY_BLOCK\]\](.*?)(\[\[|$)", content, re.DOTALL)
-                                    if memory_match:
-                                        findings = memory_match.group(1).strip()
-                                        if findings:
-                                            previous_findings.append(findings)
-                                    else:
-                                        # Fallback: take entire content if block missing
-                                        previous_findings.append(content)
+                                # Try to parse JSON
+                                try:
+                                    # Handle potential markdown wrappers
+                                    raw_json = content
+                                    if "```json" in content:
+                                        match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
+                                        if match: raw_json = match.group(1)
+                                    elif "```" in content:
+                                         match = re.search(r"```\s*(.*?)\s*```", content, re.DOTALL)
+                                         if match: raw_json = match.group(1)
                                     
-                                    st.toast(f"✅ Part {i+1} received. Rotating keys...")
-                                else:
-                                    # Final: Store result
-                                    final_output = content
-                                break # Success, move to next chunk
+                                    data = json.loads(raw_json)
+                                    items = data.get("news_items", [])
+                                    all_extracted_items.extend(items)
+                                    
+                                    log_container.success(f"✅ [Part {i+1}] Extracted {len(items)} items using '{key_used}'.")
+                                    st.toast(f"✅ Part {i+1} successful.")
+                                    break # Move to next chunk
+                                    
+                                except Exception as json_err:
+                                    log_container.error(f"⚠️ JSON Parse Error on Trial {attempt}: {json_err}. Retrying with next key...")
+                                    time.sleep(2)
+                                    continue # Force retry for malformed JSON
                             
                             else:
-                                # Failure: Check if Rate Limit (Wait)
+                                # Failure: Rate Limit or Transient
                                 err_msg = res['content']
                                 wait_sec = res.get('wait_seconds', 0)
-                                
                                 if wait_sec > 0:
-                                    log_container.warning(f"⏳ Rate Limit hit on all keys. Resting {int(wait_sec)}s...")
+                                    log_container.warning(f"⏳ Quota hit. Resting {int(wait_sec)}s...")
                                     time.sleep(wait_sec)
-                                    continue # Retry same chunk
+                                    continue
                                 else:
-                                    # RELENTLESS RETRY for transient errors (500, 503, etc.)
                                     log_container.error(f"❌ Trial {attempt} failed: {err_msg}")
-                                    log_container.info("🔄 Relentless Rotation: Waiting 5s and trying next available key...")
                                     time.sleep(5)
-                                    continue # Retry with next key automatically (GeminiClient calls KeyManager.get_key)
+                                    continue 
                 
                 progress_bar.progress(1.0)
                 status_text.empty()
                 
-                if final_output:
-                    st.session_state['ai_report'] = final_output
-                    st.balloons()
-                
-                if final_output:
-                    st.session_state['ai_report'] = final_output
+                if all_extracted_items:
+                    final_dataset = {"news_items": all_extracted_items, "total_entities": len(all_extracted_items)}
+                    st.session_state['ai_report'] = json.dumps(final_dataset, indent=2)
                     st.balloons()
 
 
@@ -435,11 +460,23 @@ if st.session_state['data_loaded']:
     with st.expander(f"📊 Market Data Preview ({len(items)} items found)"):
         st.json(items)
         
-    # Report Section
+    # Results Section (DataSet)
     if st.session_state['ai_report']:
-        st.subheader("📝 Intelligence Report")
-        st.markdown(st.session_state['ai_report'])
-        st.download_button("📥 Download Report", st.session_state['ai_report'], file_name="ai_analysis.md")
+        st.subheader("� Extracted Structured Dataset")
+        try:
+            import json
+            # Verify it's valid JSON for the display
+            parsed_data = json.loads(st.session_state['ai_report'])
+            st.json(parsed_data)
+        except:
+            st.code(st.session_state['ai_report'], language="json")
+            
+        st.download_button(
+            "📥 Download JSON Dataset", 
+            st.session_state['ai_report'], 
+            file_name="extracted_news_data.json",
+            mime="application/json"
+        )
         
     elif st.session_state['dry_run_prompts']:
         st.subheader(f"🧪 Dry Run Result ({len(st.session_state['dry_run_prompts'])} Parts)")
@@ -449,7 +486,7 @@ if st.session_state['data_loaded']:
         for i, tab in enumerate(tabs):
             prompt = st.session_state['dry_run_prompts'][i]
             with tab:
-                st.info(f"Part {i+1} Prompt - This would be sent as a separate request.")
+                st.info(f"Part {i+1} ETL Prompt - This would be sent for extraction.")
                 st.caption(f"Estimated Tokens: {km.estimate_tokens(prompt) if km else 'N/A'}")
                 st.code(prompt, language="text")
     
