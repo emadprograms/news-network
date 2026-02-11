@@ -397,29 +397,42 @@ if submitted:
                                 content = res['content']
                                 key_used = res.get('key_name', 'Unknown')
                                 
-                                # Try to parse JSON
+                                # --- ROBUST JSON EXTRACTION ---
                                 try:
-                                    # Handle potential markdown wrappers
-                                    raw_json = content
-                                    if "```json" in content:
-                                        match = re.search(r"```json\s*(.*?)\s*```", content, re.DOTALL)
-                                        if match: raw_json = match.group(1)
-                                    elif "```" in content:
-                                         match = re.search(r"```\s*(.*?)\s*```", content, re.DOTALL)
-                                         if match: raw_json = match.group(1)
+                                    raw_json = content.strip()
                                     
+                                    # Layer 1: Markdown blocks
+                                    if "```json" in raw_json:
+                                        match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
+                                        if match: raw_json = match.group(1).strip()
+                                    elif "```" in raw_json:
+                                         match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
+                                         if match: raw_json = match.group(1).strip()
+                                    
+                                    # Layer 2: Fallback to first '{' and last '}'
+                                    if not raw_json.startswith("{"):
+                                        match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
+                                        if match: raw_json = match.group(1).strip()
+                                    
+                                    # Layer 3: Clean up potentially trailing junk
+                                    if raw_json.endswith("```"):
+                                        raw_json = raw_json[:-3].strip()
+
                                     data = json.loads(raw_json)
                                     items = data.get("news_items", [])
                                     all_extracted_items.extend(items)
                                     
                                     log_container.success(f"✅ [Part {i+1}] Extracted {len(items)} items using '{key_used}'.")
                                     st.toast(f"✅ Part {i+1} successful.")
-                                    break # Move to next chunk
+                                    break # Success
                                     
                                 except Exception as json_err:
-                                    log_container.error(f"⚠️ JSON Parse Error on Trial {attempt}: {json_err}. Retrying with next key...")
+                                    log_container.error(f"⚠️ JSON Extraction Failed on Trial {attempt}: {json_err}")
+                                    with log_container.expander("🔍 View Raw AI Response"):
+                                        st.code(content)
+                                    log_container.info("🔄 Rotating to next key in 2s...")
                                     time.sleep(2)
-                                    continue # Force retry for malformed JSON
+                                    continue # Force retry with next key
                             
                             else:
                                 # Failure: Rate Limit or Transient

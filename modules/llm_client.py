@@ -69,12 +69,37 @@ class GeminiClient:
             
             if response.status_code == 200:
                 data = response.json()
-                # Parse content
+                
+                # Check for candidates and safety filters
+                candidates = data.get('candidates', [])
+                if not candidates:
+                    feedback = data.get('promptFeedback', {})
+                    block_reason = feedback.get('blockReason', 'Unknown')
+                    return {
+                        "success": False,
+                        "content": f"API returned no candidates. Block Reason: {block_reason}. (Likely Safety Filter)",
+                        "model_used": model_id,
+                        "key_name": key_name
+                    }
+
                 try:
-                    text_content = data['candidates'][0]['content']['parts'][0]['text']
+                    candidate = candidates[0]
+                    # Check finish reason
+                    finish_reason = candidate.get('finishReason')
+                    if finish_reason and finish_reason != "STOP":
+                        log.warning(f"Candidate finish reason: {finish_reason}")
                     
+                    text_content = candidate.get('content', {}).get('parts', [{}])[0].get('text', '')
+                    
+                    if not text_content:
+                         return {
+                            "success": False,
+                            "content": f"API returned empty text. Finish Reason: {finish_reason}",
+                            "model_used": model_id,
+                            "key_name": key_name
+                        }
+
                     # Report Success
-                    # Estimate output tokens roughly (1 char ~ 0.25 tokens)
                     out_tokens = int(len(text_content) * 0.25)
                     total_tokens = est_tokens + out_tokens
                     self.key_manager.report_usage(key_value, total_tokens, model_id)
@@ -88,7 +113,7 @@ class GeminiClient:
                 except (KeyError, IndexError):
                     return {
                         "success": False,
-                        "content": "Failed to parse API response structure.",
+                        "content": "Failed to parse content parts from API response.",
                         "model_used": model_id,
                         "key_name": key_name
                     }
