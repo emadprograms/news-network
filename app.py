@@ -403,7 +403,29 @@ if submitted:
                                     if raw_json.endswith("```"):
                                         raw_json = raw_json[:-3].strip()
 
-                                    data = json.loads(raw_json)
+                                    # Layer 4: Structural Repair (Missing Commas)
+                                    # Fix: }{ -> },{
+                                    raw_json = re.sub(r"\}\s*\{", "}, {", raw_json)
+                                    
+                                    # Layer 5: Ensure brackets are balanced/closed if truncated
+                                    # A crude but effective way to handle cut-off JSON is to try closing it
+                                    # (This is a last resort repair attempt)
+                                    if raw_json.strip().endswith("}") is False:
+                                         if raw_json.strip().endswith("]"):
+                                             pass # valid end
+                                         else:
+                                             pass # The AI *should* have managed this, but we can't easily guess missing structure.
+                                             # For the specific error "expecting ',' delimiter", the re.sub above usually fixes it.
+
+                                    try:
+                                        data = json.loads(raw_json)
+                                    except json.JSONDecodeError:
+                                        # Emergency Repair for "Expecting ',' delimiter"
+                                        # Sometimes key-value pairs miss a comma: "key": "val" "key2": "val"
+                                        # This is risky regex but helps in emergency
+                                        raw_json = re.sub(r'\"\s*\"', '", "', raw_json)
+                                        data = json.loads(raw_json)
+
                                     items = data.get("news_items", [])
                                     all_extracted_items.extend(items)
                                     
