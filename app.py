@@ -298,6 +298,19 @@ if submitted:
     if not st.session_state['news_data']:
         st.warning("No news found in the selected range.")
     else:
+        # --- INSTANT PREVIEW (REQUESTED) ---
+        items = st.session_state['news_data']
+        st.success(f"📦 Data Fetch Complete: {len(items)} news items found.")
+        with st.expander("📋 Emergency Copiable Headline Preview", expanded=True):
+            preview_text = f"TOTAL NEWS QUANTITY: {len(items)}\n\n"
+            for idx, item in enumerate(items):
+                t = item.get('time', 'N/A')
+                title = item.get('title', 'No Title')
+                preview_text += f"{idx+1}. [{t}] {title}\n"
+            
+            st.info("💡 Copy the headlines below for safe-keeping while the AI processes.")
+            st.code(preview_text, language="text")
+
         # B. CHUNK DATA
         chunks = chunk_data(st.session_state['news_data'], max_tokens=220000)
         
