@@ -478,10 +478,36 @@ if st.session_state['data_loaded']:
         st.subheader("� Extracted Structured Dataset")
         try:
             import json
-            # Verify it's valid JSON for the display
+            import pandas as pd
+            
+            # 1. Parse Data
             parsed_data = json.loads(st.session_state['ai_report'])
-            st.json(parsed_data)
-        except:
+            items = parsed_data.get("news_items", [])
+            
+            # 2. Neat Table View (Primary)
+            if items:
+                st.markdown("### 📋 Executive Summary Table")
+                # Flatten hard_data for the table view
+                df_rows = []
+                for it in items:
+                    row = {
+                        "Category": it.get("category", "OTHER"),
+                        "Primary Entity": it.get("primary_entity", "N/A"),
+                        "Summary": it.get("event_summary", "N/A"),
+                        "Hard Data": str(it.get("hard_data", {})),
+                        "Sentiment": it.get("sentiment_indicated", "N/A")
+                    }
+                    df_rows.append(row)
+                
+                df = pd.DataFrame(df_rows)
+                st.dataframe(df, use_container_width=True)
+            
+            # 3. Interactive JSON Tree (Secondary)
+            with st.expander("🔍 View Full JSON Structure"):
+                st.json(parsed_data)
+                
+        except Exception as e:
+            st.error(f"Display Error: {e}")
             st.code(st.session_state['ai_report'], language="json")
             
         st.download_button(
