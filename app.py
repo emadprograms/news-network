@@ -1,25 +1,28 @@
 import streamlit as st
 import time
 import datetime
+import re
 from modules.db_client import NewsDatabase
+from modules.key_manager import KeyManager
+from modules.llm_client import GeminiClient
+from infisical_sdk import InfisicalSDKClient
 
 # --- CONFIG ---
-st.set_page_config(page_title="Global News Network", page_icon="🌐", layout="wide")
+st.set_page_config(page_title="News Network", page_icon="📰", layout="wide")
 
-# Custom CSS for "News Network" Feel
+# --- INIT SESSION STATE ---
+if 'news_data' not in st.session_state:
+    st.session_state['news_data'] = []
+if 'ai_report' not in st.session_state:
+    st.session_state['ai_report'] = ""
+if 'data_loaded' not in st.session_state:
+    st.session_state['data_loaded'] = False
+if 'dry_run_prompts' not in st.session_state: 
+    st.session_state['dry_run_prompts'] = []
+
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    .big-headline {
-        font-size: 2.5em;
-        font-weight: 800;
-        color: #ff4b4b;
-        margin-bottom: 0px;
-    }
-    .sub-headline {
-        font-size: 1.2em;
-        color: #fafafa;
-        margin-bottom: 20px;
-    }
     .ticker-wrap {
         width: 100%;
         overflow: hidden;
@@ -27,8 +30,6 @@ st.markdown("""
         color: #00ff41;
         font-family: 'Courier New', Courier, monospace;
         padding: 10px 0;
-        border-top: 2px solid #00ff41;
-        border-bottom: 2px solid #00ff41;
         white-space: nowrap;
         box-sizing: border-box;
     }
@@ -41,331 +42,386 @@ st.markdown("""
         0%   { transform: translate(0, 0); }
         100% { transform: translate(-100%, 0); }
     }
-    .news-card {
-        background-color: #262730;
-        padding: 15px;
+    .stButton>button {
+        width: 100%;
         border-radius: 5px;
-        margin-bottom: 10px;
-        border-left: 5px solid #ff4b4b;
-    }
-    .stock-card {
-        border-left: 5px solid #00ff41 !important;
-    }
-    .meta-tag {
-        font-size: 0.8em;
-        color: #aaa;
+        height: 3em; 
     }
 </style>
 """, unsafe_allow_html=True)
 
-from infisical_sdk import InfisicalSDKClient
 
-# --- INIT INFISICAL ---
-try:
-    infisical_secrets = st.secrets["infisical"]
-    infisical = InfisicalSDKClient(host="https://app.infisical.com")
-    
-    infisical.auth.universal_auth.login(
-        client_id=infisical_secrets["client_id"],
-        client_secret=infisical_secrets["client_secret"]
-    )
-    
-    # Fetch Turso Secrets
-    # Assuming environment 'dev' and project id from secrets.toml
-    db_url_secret = infisical.secrets.get_secret_by_name(
-        secret_name="turso_emadarshadalam_newsdatabase_DB_URL",
-        project_id=infisical_secrets["project_id"],
-        environment_slug="dev",
-        secret_path="/"
-    ).secretValue
-    
-    db_token_secret = infisical.secrets.get_secret_by_name(
-        secret_name="turso_emadarshadalam_newsdatabase_AUTH_TOKEN",
-        project_id=infisical_secrets["project_id"],
-        environment_slug="dev",
-        secret_path="/"
-    ).secretValue
+# --- DB / KEY INIT ---
+@st.cache_resource
+def get_db_connection():
+    try:
+        infisical_secrets = st.secrets["infisical"]
+        infisical = InfisicalSDKClient(host="https://app.infisical.com")
+        
+        infisical.auth.universal_auth.login(
+            client_id=infisical_secrets["client_id"],
+            client_secret=infisical_secrets["client_secret"]
+        )
+        
+        db_url_secret = infisical.secrets.get_secret_by_name(
+            secret_name="turso_emadarshadalam_newsdatabase_DB_URL",
+            project_id=infisical_secrets["project_id"],
+            environment_slug="dev",
+            secret_path="/"
+        ).secretValue
+        
+        db_token_secret = infisical.secrets.get_secret_by_name(
+            secret_name="turso_emadarshadalam_newsdatabase_AUTH_TOKEN",
+            project_id=infisical_secrets["project_id"],
+            environment_slug="dev",
+            secret_path="/"
+        ).secretValue
+        
+        db = NewsDatabase(
+            db_url_secret.replace("libsql://", "https://"),
+            db_token_secret
+        )
+        return db, db_url_secret, db_token_secret
+        
+    except Exception as e:
+        st.error(f"Failed to initialize DB/Keys: {e}")
+        return None, None, None
 
-    db = NewsDatabase(
-        db_url_secret.replace("libsql://", "https://"),
-        db_token_secret
-    )
-except Exception as e:
-    st.error(f"Failed to fetch secrets from Infisical: {e}")
-    db = None
+db, db_url, db_token = get_db_connection()
 
-# --- HEADER ---
-st.title("🌐 GRANDMASTER NEWS NETWORK")
-st.caption("LIVE INTELLIGENCE FEED")
+if db_url and db_token:
+    km = KeyManager(db_url, db_token)
+    ai_client = GeminiClient(km)
+else:
+    km = None
+    ai_client = None
 
-# --- HELPERS ---
-import re
 
+# --- HELPER FUNCTIONS ---
 def clean_content(content_list):
-    """
-    Cleans raw text validation issues, stripping HTML tags and fixing spacing.
-    Returns a list of clean paragraphs.
-    """
+    """Cleans text list into pure paragraphs."""
     if not content_list: return []
-    
-    # 1. Join to handle fragmented spans
     full_text = " ".join(content_list)
-    
-    # 2. Strip HTML Tags (e.g. <span>, <div>)
     clean_text = re.sub(r'<[^>]+>', '', full_text)
     
-    # 3. Fix "StockStory" clutter
-    
-    # 4. Split back into paragraphs based on sentence endings or existing newlines
     paragraphs = []
-    
-    # If the text was originally just one big block
     if len(content_list) <= 1:
-        # Split by semantic boundaries for readability
         parts = clean_text.split(". ")
         current_p = ""
         for p in parts:
             current_p += p + ". "
-            if len(current_p) > 200: # chunk size
+            if len(current_p) > 200: 
                 paragraphs.append(current_p.strip())
                 current_p = ""
         if current_p: paragraphs.append(current_p.strip())
     else:
-        # It was already a list, just cleaned the HTML from items
-        # Re-split by newline in case 
         paragraphs = [re.sub(r'<[^>]+>', '', c).strip() for c in content_list if c.strip()]
-
     return paragraphs
 
-
-# --- CONTROL PANEL ---
-with st.expander("🎛️ Control Panel (Time, Filters & Export)", expanded=False):
-    # 1. TIME MACHINE
-    st.subheader("🕰️ Time Machine")
-    use_time_travel = st.checkbox("Enable Time Filter", value=False)
+def chunk_data(items, max_tokens=220000): # Reverted to 220k
+    """Splits items into chunks. Truncates individual items if they exceed limit."""
+    chunks = []
+    current_chunk = []
+    current_tokens = 0
     
-    start_date, end_date = None, None # defaults
-    
-    if use_time_travel:
-        col_start_d, col_start_t = st.columns(2)
-        with col_start_d:
-            start_date = st.date_input("From Date", value=None)
-        with col_start_t:
-            start_time = st.time_input("From Time", value=datetime.time(0, 0))
-            
-        col_end_d, col_end_t = st.columns(2)
-        with col_end_d:
-            end_date = st.date_input("To Date", value=datetime.date.today())
-        with col_end_t:
-            end_time = st.time_input("To Time", value=datetime.time(23, 59))
+    for item in items:
+        body = " ".join(clean_content(item.get('content', [])))
+        meta = f"{item.get('time')} {item.get('title')} {item.get('publisher')}"
         
-        st.info("Displaying news strictly within this window.")
-
-    # 2. DATA FETCH (Inside Expander to show status)
-    st.divider()
-    if db:
-        if use_time_travel and start_date and end_date:
-            # Construct ISO Strings
-            dt_start = datetime.datetime.combine(start_date, start_time)
-            dt_end = datetime.datetime.combine(end_date, end_time)
-            iso_start = dt_start.isoformat()
-            iso_end = dt_end.isoformat()
+        # Hard truncate individual items to max_tokens to prevent single-item overflow
+        # 1 token ~ 2.5 chars. Max chars ~ 250k for 100k tokens.
+        if len(body) > (max_tokens * 2.5):
+            body = body[:int(max_tokens * 2.5)] + "... [TRUNCATED]"
             
-            news_items = db.fetch_news_range(iso_start, iso_end)
-            st.caption(f"Found {len(news_items)} reports between {iso_start} and {iso_end}")
-        else:
-            # Default: Fetch EVERYTHING from Today (or last active day)
-            today = datetime.date.today()
-            news_items = db.fetch_news_by_date(today)
-            st.caption(f"Showing all events for Today ({today})")
+        total_chars = len(body) + len(meta) + 50 
+        est_tok = int(total_chars / 2.5)
+        
+        # If adding this item exceeds limit, start new chunk
+        if (current_tokens + est_tok) > max_tokens and current_chunk:
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_tokens = 0
+            
+        current_chunk.append(item)
+        current_tokens += est_tok
+        
+    if current_chunk:
+        chunks.append(current_chunk)
+        
+    return chunks
+
+def build_prompt_from_items(items, system_instruction):
+    context_blob = ""
+    for item in items:
+        t = item.get('time', 'N/A')
+        title = item.get('title', 'No Title')
+        src = item.get('publisher', 'Unknown')
+        body = " ".join(clean_content(item.get('content', [])))
+        context_blob += f"[{t}] {title} ({src})\n{body}\n\n"
+        
+    return f"{system_instruction}\n\n=== MARKET DATA ===\n{context_blob}"
+
+def build_chunk_prompt(chunk, index, total, system_instruction):
+    """Builds a prompt for a specific chunk with explicit Part X of Y instructions."""
+    if total == 1:
+        return build_prompt_from_items(chunk, system_instruction)
+    
+    # 0-indexed vs 1-indexed conversion
+    # index is 0-based. total is 1-based count.
+    # index 0 is Part 1. index (total-1) is Part (total) == LAST.
+    
+    is_last_part = (index + 1) == total
+    
+    if is_last_part:
+        # FINAL PART PROMPT
+        system_notice = (
+            f" SYSTEM NOTICE: This is PART {index+1} of {total} (FINAL PART).\n"
+            f" INSTRUCTIONS:\n"
+            f" 1. Analyze this final dataset.\n"
+            f" 2. Combine findings from this part with all previous parts (if available).\n"
+            f" 3. GENERATE THE FINAL COMPREHENSIVE REPORT NOW.\n"
+            f" {system_instruction}"
+        )
     else:
-        news_items = []
-
-    if not news_items:
-        st.warning("No news found. Try adjusting the filters.")
+        # INTERMEDIATE PART PROMPT (Stealth Extraction)
+        system_notice = (
+            f" SYSTEM NOTICE: This is PART {index+1} of {total}.\n"
+            f" INSTRUCTIONS:\n"
+            f" 1. Analyze this partial dataset.\n"
+            f" 2. EXTRACT detailed findings into a block labeled [[MEMORY_BLOCK]]. This is for internal use.\n"
+            f" 3. OUTSIDE the block, simply acknowledge receipt: 'Received Part {index+1} of {total}, ready for next part.'\n"
+            f" 4. Do NOT generate a final analysis yet.\n"
+            f" {system_instruction}"
+        )
         
-    # 3. FILTERS & EXPORT
-    if news_items:
+    return build_prompt_from_items(chunk, system_notice)
+
+
+# ==============================================================================
+#  LAY OUT
+# ==============================================================================
+
+# 1. HEADER
+st.title("📰 News Network Analysis")
+
+# 2. UNIFIED CONTROL PANEL
+with st.container():
+    st.subheader("🛠️ Analyst Control Panel")
+    
+    # DEBUG: Key Status
+    with st.expander("🔑 System Keys & Status"):
+        if km:
+            keys = km.get_all_managed_keys()
+            if keys:
+                # hide values
+                clean_keys = []
+                for k in keys:
+                    clean_keys.append({
+                        "Name": k['key_name'],
+                        "Tier": k.get('tier', 'free'),
+                        "Priority": k.get('priority', 10),
+                        "Added": k.get('added_at', 'N/A')
+                    })
+                st.dataframe(clean_keys)
+            else:
+                st.warning("No keys found in Database.")
+        else:
+            st.error("KeyManager not initialized.")
+
+    with st.form("analyst_controls"):
+        # ROW 1: Time Window
+        st.markdown("**1. Select Time Window**")
+        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+        with col_t1: start_date = st.date_input("From Date", value=datetime.date.today())
+        with col_t2: start_time = st.time_input("From Time", value=datetime.time(0, 0))
+        with col_t3: end_date = st.date_input("To Date", value=datetime.date.today())
+        with col_t4: end_time = st.time_input("To Time", value=datetime.time(23, 59))
+        
         st.divider()
-        st.subheader("📋 Filter & Export")
-        
-        col_filter, col_export = st.columns(2)
-        
-        with col_filter:
-            st.markdown("**Source Filter**")
-            all_pubs = sorted(list(set([n.get('publisher', 'Unknown') for n in news_items])))
-            selected_pubs = st.multiselect("Select Publishers", options=all_pubs, default=all_pubs)
-            # Apply Filter immediately
-            news_items = [n for n in news_items if n.get('publisher', 'Unknown') in selected_pubs]
-            st.caption(f"Showing {len(news_items)} after source filter.")
 
-        with col_export:
-             st.markdown("**Export Options**")
-             macro_cats = ['MACRO', 'FED', 'INDICATORS', 'TREASURY', 'ECONOMY_GROWTH', 'ENERGY', 'COMMODITIES', 'GEO_POLITICS', 'FX', 'ECONOMY', 'GEO', 'MARKETS', 'GLOBAL']
-             stock_cats = ['STOCKS', 'EQUITIES', 'EARNINGS', 'IPO', 'ANALYST_RATINGS', 'MERGERS', 'MERGERS_ACQUISITIONS', 'DIVIDENDS', 'BUYBACKS', 'INSIDER_MOVES', 'GUIDANCE', 'CONTRACTS', 'FDA', 'LEGAL', 'MANAGEMENT', 'SECTOR_NEWS']
-             export_options = ["MACRO", "STOCKS", "COMPANY"]
-             selected_export_cats = st.multiselect("Export Categories", options=export_options, default=export_options)
-
-             # Generate Text
-             final_export_items = []
-             for item in news_items:
-                cat = item.get('category', 'GENERAL')
-                group = "COMPANY"
-                if cat in macro_cats: group = "MACRO"
-                elif cat in stock_cats: group = "STOCKS"
-                if group in selected_export_cats:
-                    final_export_items.append(item)
+        # ROW 2: AI Configuration
+        st.markdown("**2. AI Configuration**")
+        col_ai1, col_ai2 = st.columns([3, 1])
+        
+        with col_ai1:
+            default_sys = (
+                "You are a master financial analyst. Review the provided news items and generate a strategic market summary.\n"
+                "Identify key trends, correlation between assets, and potential market moving events.\n"
+                "Format the output as a professional briefing."
+            )
+            system_instruction = st.text_area("System Instruction", value=default_sys, height=100)
             
-             if final_export_items:
-                export_lines = []
-                export_lines.append(f"# Market Intelligence Report ({len(final_export_items)} items)")
-                export_lines.append(f"Categories: {', '.join(selected_export_cats)}")
-                if use_time_travel:
-                    export_lines.append(f"Time Window: {start_time} to {end_time}")
-                export_lines.append("---")
-                for item in final_export_items:
-                    cat = item.get('category', 'GENERAL')
-                    time_str = item.get('time', 'N/A')
-                    title = item.get('title', 'No Title')
-                    pub = item.get('publisher', 'Unknown')
-                    full_body = "\n".join(clean_content(item.get('content', [])))
-                    export_lines.append(f"[{time_str}] ({cat}) {title} [{pub}]")
-                    export_lines.append(f"{full_body}\n")
-                final_text = "\n".join(export_lines)
+        with col_ai2:
+            if km:
+                 model_options = list(km.MODELS_CONFIG.keys())
+                 ix = 0
+                 if 'gemini-2.0-flash-paid' in model_options:
+                     ix = model_options.index('gemini-2.0-flash-paid')
+                 elif 'gemini-2.5-flash-free' in model_options:
+                     ix = model_options.index('gemini-2.5-flash-free')
+                 selected_model = st.selectbox("Select Model", options=model_options, index=ix)
+            else:
+                st.error("Keys unavailable")
+                selected_model = None
+
+        st.divider()
+        
+        # ROW 3: Execution Mode
+        col_exec, col_btn = st.columns([3, 1])
+        with col_exec:
+             mode = st.radio("Execution Mode", ["🚀 Run Analysis (Fetch + AI)", "🧪 Dry Run (Fetch + Build Prompt Only)"], horizontal=True)
+        
+        with col_btn:
+            st.write("") 
+            st.write("") 
+            submitted = st.form_submit_button("▶️ EXECUTE WORKFLOW", type="primary")
+
+# 3. EXECUTION LOGIC
+if submitted:
+    # A. FETCH DATA
+    st.session_state['data_loaded'] = False
+    st.session_state['news_data'] = []
+    st.session_state['ai_report'] = ""
+    st.session_state['dry_run_prompts'] = []
+    
+    if db:
+        with st.spinner("1/3 Fetching Market Data..."):
+             dt_start = datetime.datetime.combine(start_date, start_time)
+             dt_end = datetime.datetime.combine(end_date, end_time)
+             items = db.fetch_news_range(dt_start.isoformat(), dt_end.isoformat())
+             
+             st.session_state['news_data'] = items
+             st.session_state['data_loaded'] = True
+    else:
+        st.error("Database connection unavailable.")
+        st.stop()
+
+    if not st.session_state['news_data']:
+        st.warning("No news found in the selected range.")
+    else:
+        # B. CHUNK DATA
+        chunks = chunk_data(st.session_state['news_data'], max_tokens=220000)
+        
+        if len(chunks) > 1:
+            st.toast(f"Data too large for one prompt. Split into {len(chunks)} parts.")
+        
+        # C. EXECUTE MODE
+        if "Dry Run" in mode:
+            prompts = []
+            for i, chunk in enumerate(chunks):
+                # Use the shared helper to get exact prompt
+                p = build_chunk_prompt(chunk, i, len(chunks), system_instruction)
+                prompts.append(p)
+            st.session_state['dry_run_prompts'] = prompts
+            st.toast(f"Dry Run Complete: {len(prompts)} prompts built.")
+            
+        else:
+            # Run AI
+            if not ai_client:
+                st.error("AI Client unavailable.")
+            else:
+                final_output = ""
                 
-                st.download_button(
-                    label=f"📥 Download ({len(final_export_items)})",
-                    data=final_text,
-                    file_name=f"market_intel_{datetime.date.today()}.txt",
-                    mime="text/plain"
-                )
+                # CASE 1: Single Chunk (Direct)
+                if len(chunks) == 1:
+                    full_prompt = build_chunk_prompt(chunks[0], 0, 1, system_instruction)
+                    with st.spinner(f"2/3 Analyzing {len(chunks[0])} items with {selected_model}..."):
+                        result = ai_client.generate_content(full_prompt, config_id=selected_model)
+                        if result['success']:
+                            final_output = result['content']
+                        else:
+                            st.error(f"Analysis Failed: {result['content']}")
+                            
+                # CASE 2: Multiple Chunks (Map-Reduce)
+                else:
+                    summaries = []
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    # MAP PHASE
+                    for i, chunk in enumerate(chunks):
+                        # RATE LIMIT ENFORCEMENT
+                        if i > 0:
+                            for s in range(60, 0, -1):
+                                status_text.info(f"⏳ Rate Limit Cooldown: Resuming in {s} seconds...")
+                                time.sleep(1)
+                        
+                        status_text.text(f"Processing Part {i+1}/{len(chunks)}...")
+                        progress_bar.progress((i) / len(chunks))
+                        
+                        with st.spinner(f"2/3 Processing Part {i+1}/{len(chunks)} ({len(chunk)} items)..."):
+                             # Use the shared helper
+                             p = build_chunk_prompt(chunk, i, len(chunks), system_instruction)
+                             
+                             res = ai_client.generate_content(p, config_id=selected_model)
+                             if res['success']:
+                                 summaries.append(f"--- PART {i+1} SUMMARY ---\n{res['content']}")
+                             else:
+                                 st.error(f"Part {i+1} Failed: {res['content']}")
+                        
+                    progress_bar.progress(1.0)
+                    status_text.empty()
+                    
+                    # REDUCE PHASE
+                    if summaries:
+                        if len(chunks) > 1:
+                             for s in range(60, 0, -1):
+                                st.info(f"⏳ Final Cooldown: Synthesis in {s} seconds...")
+                                time.sleep(1)
+                                
+                        with st.spinner("3/3 Synthesizing Final Report..."):
+                            combined_summaries = "\n\n".join(summaries)
+                            reduce_prompt = (
+                                f"{system_instruction}\n\n"
+                                "Here are the intermediate summaries from analyzing the data in parts. "
+                                "Synthesize them into one final, cohesive intelligence report.\n\n"
+                                f"=== INTERMEDIATE DATA ===\n{combined_summaries}"
+                            )
+                            
+                            final_res = ai_client.generate_content(reduce_prompt, config_id=selected_model)
+                            if final_res['success']:
+                                final_output = final_res['content']
+                            else:
+                                st.error(f"Final Synthesis Failed: {final_res['content']}")
                 
-        # Copy Block (Full Width)
-        if 'final_text' in locals():
-            with st.expander("Preview / Copy Report"):
-                st.code(final_text, language="markdown")
+                if final_output:
+                    st.session_state['ai_report'] = final_output
+                    st.balloons()
 
 
-# --- TICKER ---
-# Create a string for the marquee
-headlines = [f"💥 {n['title'].upper()}" for n in news_items[:10]]
-ticker_text = "   +++   ".join(headlines)
-
-st.markdown(f"""
-<div class="ticker-wrap">
-<div class="ticker">{ticker_text}</div>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("##") # Spacer
-
-# --- HELPERS ---
-
-# Tabs for clearer separation
-# Tabs for clearer separation
-tab1, tab2, tab3 = st.tabs(["🌍 GLOBAL HEADLINES", "📈 STOCKS NEWS", "🏢 COMPANY NEWS"])
-
-with tab1:
-    # Filter for MACRO or Main news
-    # New Categories: FED, INDICATORS, TREASURY, ECONOMY_GROWTH, ENERGY, GEO_POLITICS, FX
-    macro_cats = ['MACRO', 'FED', 'INDICATORS', 'TREASURY', 'ECONOMY_GROWTH', 'ENERGY', 'COMMODITIES', 'GEO_POLITICS', 'FX', 'ECONOMY', 'GEO', 'MARKETS', 'GLOBAL']
-    macro_news = [n for n in news_items if n.get('category') in macro_cats]
+# 4. RESULTS DISPLAY
+if st.session_state['data_loaded']:
+    st.divider()
     
-    if not macro_news:
-         st.markdown("*No Macro reports available.*")
+    # Ticker
+    items = st.session_state['news_data']
+    headlines = [f"💥 {n.get('title', 'Unknown').upper()}" for n in items[:15]]
+    ticker_text = "   +++   ".join(headlines)
+    st.markdown(f"""
+    <div class="ticker-wrap">
+    <div class="ticker">{ticker_text}</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    for item in macro_news:
-        clean_paragraphs = clean_content(item['content'])
-        preview = clean_paragraphs[0] if clean_paragraphs else 'Updates coming in...'
+    with st.expander(f"📊 Market Data Preview ({len(items)} items found)"):
+        st.json(items)
         
-        # Add visual tag for granular category
-        cat_tag = item.get('category', 'MACRO')
-        pub = item.get('publisher', 'Unknown')
+    # Report Section
+    if st.session_state['ai_report']:
+        st.subheader("📝 Intelligence Report")
+        st.markdown(st.session_state['ai_report'])
+        st.download_button("📥 Download Report", st.session_state['ai_report'], file_name="ai_analysis.md")
         
-        with st.container():
-            st.markdown(f"""
-            <div class="news-card">
-                <h4>{item['title']} <span style="font-size:0.6em; background-color:#444; padding:2px 5px; border-radius:3px;">{cat_tag}</span></h4>
-                <p class="meta-tag">🕒 {item.get('time', 'N/A')} | 🏢 <b>{pub}</b> | 📡 {item['source_domain']}</p>
-                <p>{preview}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            with st.expander("Reading Full Report"):
-                for p in clean_paragraphs:
-                    st.write(p)
-                st.caption(f"[Source Link]({item['url']})")
-
-with tab2:
-    # Filter for STOCKS
-    # New Categories: EARNINGS, ANALYST_RATINGS, MERGERS_ACQUISITIONS, IPO, INSIDER_MOVES, SECTOR_NEWS, EQUITIES
-    stock_cats = ['STOCKS', 'TEST', 'EARNINGS', 'ANALYST_RATINGS', 'MERGERS', 'MERGERS_ACQUISITIONS', 'IPO', 'INSIDER_MOVES', 'SECTOR_NEWS', 'EQUITIES', 'DIVIDENDS', 'BUYBACKS', 'GUIDANCE', 'CONTRACTS', 'FDA', 'LEGAL', 'MANAGEMENT']
-    stock_news = [n for n in news_items if n.get('category') in stock_cats]
+    elif st.session_state['dry_run_prompts']:
+        st.subheader(f"🧪 Dry Run Result ({len(st.session_state['dry_run_prompts'])} Parts)")
+        
+        tabs = st.tabs([f"Part {i+1}" for i in range(len(st.session_state['dry_run_prompts']))])
+        
+        for i, tab in enumerate(tabs):
+            prompt = st.session_state['dry_run_prompts'][i]
+            with tab:
+                st.info(f"Part {i+1} Prompt - This would be sent as a separate request.")
+                st.caption(f"Estimated Tokens: {km.estimate_tokens(prompt) if km else 'N/A'}")
+                st.code(prompt, language="text")
     
-    if not stock_news:
-        st.markdown("*No Stock reports available.*")
-
-    for item in stock_news:
-        clean_paragraphs = clean_content(item['content'])
-        preview = clean_paragraphs[0] if clean_paragraphs else 'Updates coming in...'
-        
-        cat_tag = item.get('category', 'STOCKS')
-        pub = item.get('publisher', 'Unknown')
-
-        # Use the SAME Card Style, but with green accent (stock-card class)
-        with st.container():
-            st.markdown(f"""
-            <div class="news-card stock-card">
-                 <h4>{item['title']} <span style="font-size:0.6em; background-color:#444; padding:2px 5px; border-radius:3px;">{cat_tag}</span></h4>
-                <p class="meta-tag">🕒 {item.get('time', 'N/A')} | 🏢 <b>{pub}</b> | 📡 {item['source_domain']}</p>
-                <p>{preview}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with st.expander("Details"):
-             if clean_paragraphs:
-                 for p in clean_paragraphs:
-                     st.write(p)
-             else:
-                 st.caption("No content available.")
-        st.divider()
-
-with tab3:
-    # Filter for COMPANY SPECIFIC (Anything not in the previous cats)
-    # We explicitly exclude the known macro/stock categories to find the "tickers"
-    # Actually, simpler logic: verify if category is likely a Ticker (all caps, short)
-    # OR just subtract the sets.
-    
-    known_cats = set(macro_cats + stock_cats)
-    company_news = [n for n in news_items if n.get('category') not in known_cats]
-    
-    if not company_news:
-        st.markdown("*No Company-Specific reports available.*")
-        
-    for item in company_news:
-        clean_paragraphs = clean_content(item['content'])
-        preview = clean_paragraphs[0] if clean_paragraphs else 'Updates coming in...'
-        
-        cat_tag = item.get('category', 'COMPANY')
-        pub = item.get('publisher', 'Unknown')
-        
-        # Blue accent for Companies
-        with st.container():
-            st.markdown(f"""
-            <div class="news-card" style="border-left: 5px solid #1f77b4 !important;">
-                 <h4>{item['title']} <span style="font-size:0.6em; background-color:#1f77b4; padding:2px 5px; border-radius:3px;">{cat_tag}</span></h4>
-                <p class="meta-tag">🕒 {item.get('time', 'N/A')} | 🏢 <b>{pub}</b> | 📡 {item['source_domain']}</p>
-                <p>{preview}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with st.expander("Reading Full Report"):
-             if clean_paragraphs:
-                 for p in clean_paragraphs:
-                     st.write(p)
-             else:
-                 st.caption("No content available.")
-        st.divider()
-
-# --- REFRESH BUTTON ---
-if st.button("🔄 REFRESH FEED"):
-    st.rerun()
+    pass
