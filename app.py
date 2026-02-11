@@ -24,25 +24,6 @@ if 'dry_run_prompts' not in st.session_state:
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    .ticker-wrap {
-        width: 100%;
-        overflow: hidden;
-        background-color: #0e1117;
-        color: #00ff41;
-        font-family: 'Courier New', Courier, monospace;
-        padding: 10px 0;
-        white-space: nowrap;
-        box-sizing: border-box;
-    }
-    .ticker {
-        display: inline-block;
-        animation: marquee 120s linear infinite;
-        padding-left: 100%; 
-    }
-    @keyframes marquee {
-        0%   { transform: translate(0, 0); }
-        100% { transform: translate(-100%, 0); }
-    }
     .stButton>button {
         width: 100%;
         border-radius: 5px;
@@ -146,7 +127,6 @@ def chunk_data(items, max_tokens=220000): # Reverted to 220k
         meta = f"{item.get('time')} {item.get('title')} {item.get('publisher')}"
         
         # Hard truncate individual items to max_tokens to prevent single-item overflow
-        # 1 token ~ 2.5 chars. Max chars ~ 250k for 100k tokens.
         if len(body) > (max_tokens * 2.5):
             body = body[:int(max_tokens * 2.5)] + "... [TRUNCATED]"
             
@@ -166,17 +146,6 @@ def chunk_data(items, max_tokens=220000): # Reverted to 220k
         chunks.append(current_chunk)
         
     return chunks
-
-def build_prompt_from_items(items, system_instruction):
-    context_blob = ""
-    for item in items:
-        t = item.get('time', 'N/A')
-        title = item.get('title', 'No Title')
-        src = item.get('publisher', 'Unknown')
-        body = " ".join(clean_content(item.get('content', [])))
-        context_blob += f"[{t}] {title} ({src})\n{body}\n\n"
-        
-    return f"{system_instruction}\n\n=== MARKET DATA ===\n{context_blob}"
 
 def build_chunk_prompt(chunk, index, total, market_data_text):
     """
@@ -246,7 +215,6 @@ with st.container():
         if km:
             keys = km.get_all_managed_keys()
             if keys:
-                # hide values
                 clean_keys = []
                 for k in keys:
                     clean_keys.append({
@@ -286,7 +254,6 @@ with st.container():
             if km:
                  model_options = list(km.MODELS_CONFIG.keys())
                  ix = 0
-                 # default to flash-paid if available for speed/cost balance
                  if 'gemini-2.0-flash-paid' in model_options:
                      ix = model_options.index('gemini-2.0-flash-paid')
                  elif 'gemini-1.5-flash-paid' in model_options:
@@ -460,22 +427,15 @@ if submitted:
 if st.session_state['data_loaded']:
     st.divider()
     
-    # Ticker
+    # Market Data Preview
     items = st.session_state['news_data']
-    headlines = [f"💥 {n.get('title', 'Unknown').upper()}" for n in items[:15]]
-    ticker_text = "   +++   ".join(headlines)
-    st.markdown(f"""
-    <div class="ticker-wrap">
-    <div class="ticker">{ticker_text}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
     with st.expander(f"📊 Market Data Preview ({len(items)} items found)"):
         st.json(items)
         
     # Results Section (DataSet)
     if st.session_state['ai_report']:
-        st.subheader("� Extracted Structured Dataset")
+        st.subheader("📦 Extracted Structured Dataset")
+        
         try:
             import json
             import pandas as pd
@@ -484,43 +444,31 @@ if st.session_state['data_loaded']:
             parsed_data = json.loads(st.session_state['ai_report'])
             items = parsed_data.get("news_items", [])
             
-            # 2. Rich Report View (Primary)
+            # 2. Neat Table View (Primary)
             if items:
-                st.markdown("### 📋 Intelligence Report")
-                
+                st.markdown("### 📋 Executive Summary Table")
+                # Flatten hard_data for the table view
+                df_rows = []
                 for it in items:
-                    with st.container():
-                        # Header: Category & Sentiment
-                        cat = it.get("category", "OTHER").upper()
-                        sent = it.get("sentiment_indicated", "NEUTRAL").upper()
-                        
-                        col_h1, col_h2 = st.columns([1, 1])
-                        with col_h1:
-                            st.caption(f"CATEGORY: **{cat}**")
-                        with col_h2:
-                            sentiment_icon = "⚪"
-                            if "BULLISH" in sent or "POSITIVE" in sent: sentiment_icon = "🟢"
-                            elif "BEARISH" in sent or "NEGATIVE" in sent: sentiment_icon = "🔴"
-                            st.markdown(f"<div style='text-align: right;'>{sentiment_icon} {sent}</div>", unsafe_allow_html=True)
-                        
-                        # Content
-                        st.subheader(it.get("primary_entity", "N/A"))
-                        st.write(it.get("event_summary", "No summary provided."))
-                        
-                        # Hard Data Metrics
-                        hard_data = it.get("hard_data", {})
-                        if hard_data:
-                            st.markdown("**📊 Key Metrics & Data Points:**")
-                            cols = st.columns(len(hard_data) if len(hard_data) > 0 else 1)
-                            for idx, (k, v) in enumerate(hard_data.items()):
-                                with cols[idx % len(cols)]:
-                                    st.metric(label=k.replace("_", " ").title(), value=str(v))
-                        
-                        st.divider()
+                    row = {
+                        "Category": it.get("category", "OTHER"),
+                        "Primary Entity": it.get("primary_entity", "N/A"),
+                        "Summary": it.get("event_summary", "N/A"),
+                        "Hard Data": str(it.get("hard_data", {})),
+                        "Sentiment": it.get("sentiment_indicated", "N/A")
+                    }
+                    df_rows.append(row)
+                
+                df = pd.DataFrame(df_rows)
+                st.dataframe(df, use_container_width=True)
             
-            # 3. Interactive JSON Tree (Secondary)
-            with st.expander("🔍 View Machine-Readable JSON Structure"):
+            # 3. Interactive JSON Tree & Copy Option
+            with st.expander("🔍 View/Copy Full JSON Structure"):
+                st.info("💡 You can copy the JSON by clicking the icon in the top-right of the code block below.")
                 st.json(parsed_data)
+                st.divider()
+                st.caption("📋 Raw JSON (Ideal for Copying)")
+                st.code(st.session_state['ai_report'], language="json")
                 
         except Exception as e:
             st.error(f"Display Error: {e}")
