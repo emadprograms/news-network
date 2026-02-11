@@ -360,29 +360,29 @@ if submitted:
                     """
                     Robust JSON repair for common LLM syntax errors.
                     """
+                    # 0. Strip leading/trailing non-json junk that might have slipped through
+                    json_str = json_str.strip()
+                    
                     # 1. Fix missing commas between objects: } { -> }, {
                     json_str = re.sub(r'\}\s*\{', '}, {', json_str)
                     
                     # 2. Fix missing commas between array items: ] [ -> ], [
                     json_str = re.sub(r'\]\s*\[', '], [', json_str)
                     
-                    # 3. Fix missing commas after string values: "val" "key" -> "val", "key"
-                    # Safer: Look for a closing quote, whitespace, and an opening quote that starts a new key or value
-                    # But we must avoid breaking "key": "value"
-                    # So we look for " " NOT followed by :
-                    try:
-                        # Quick hack for "key": "val" "key2": "val" -> "val", "key2"
-                        # We look for: " <newline> "
-                        json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
-                    except:
-                        pass
+                    # 3. Fix Trailing Commas: , } -> } and , ] -> ]
+                    # This is the most likely cause of "Expecting property name" errors
+                    json_str = re.sub(r',\s*\}', '}', json_str)
+                    json_str = re.sub(r',\s*\]', ']', json_str)
 
-                    # 4. Fix missing commas after literals (numbers, true, false, null)
-                    json_str = re.sub(r'(\d+|true|false|null)\s*\"', r'\1, "', json_str)
+                    # 4. Fix missing commas between key-value pairs
+                    # Pattern: "val" "key": -> "val", "key":
+                    json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
                     
-                    # 5. Fix Missing Colons (The "Expecting :" error)
+                    # 5. Fix missing commas after literals (numbers, true, false, null)
+                    json_str = re.sub(r'(\d+|true|false|null)\s*\n\s*\"', r'\1, "', json_str)
+                    
+                    # 6. Fix Missing Colons (The "Expecting :" error)
                     # Pattern: "key" "value" -> "key": "value"
-                    # This happens when the AI writes: "category" "EARNINGS"
                     json_str = re.sub(r'\"([a-zA-Z0-9_]+)\"\s+\"([^\"]+)\"', r'"\1": "\2"', json_str)
                     
                     return json_str
