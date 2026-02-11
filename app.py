@@ -354,6 +354,26 @@ if submitted:
                 # --- LIVE ETL LOGS ---
                 log_expander = st.expander("🛠️ Live ETL Logs", expanded=True)
                 log_container = log_expander.container()
+                
+                def repair_json_content(json_str):
+                    """
+                    Robust JSON repair for common LLM syntax errors.
+                    """
+                    # 1. Fix missing commas between objects: } { -> }, {
+                    json_str = re.sub(r'\}\s*\{', '}, {', json_str)
+                    
+                    # 2. Fix missing commas between array items: ] [ -> ], [
+                    json_str = re.sub(r'\]\s*\[', '], [', json_str)
+                    
+                    # 3. Fix missing commas after string values: "val" "key" -> "val", "key"
+                    # We use a negative lookbehind to ensure we don't match ": " inside an object
+                    json_str = re.sub(r'\"\s*\"', '", "', json_str)
+                    
+                    # 4. Fix missing commas after literals (numbers, true, false, null)
+                    # 123 "key" -> 123, "key"
+                    json_str = re.sub(r'(\d+|true|false|null)\s*\"', r'\1, "', json_str)
+                    
+                    return json_str
 
                 for i, chunk in enumerate(chunks):
                     # 1. Build context for this chunk
@@ -403,30 +423,29 @@ if submitted:
                                     if raw_json.endswith("```"):
                                         raw_json = raw_json[:-3].strip()
 
-                                    # Layer 4: Structural Repair (Missing Commas)
-                                    # Fix: }{ -> },{
-                                    raw_json = re.sub(r"\}\s*\{", "}, {", raw_json)
+                                    # Layer 4: Structural Repair (Aggressive)
+                                    raw_json = repair_json_content(raw_json)
                                     
                                     # Layer 5: Ensure brackets are balanced/closed if truncated
-                                    # A crude but effective way to handle cut-off JSON is to try closing it
-                                    # (This is a last resort repair attempt)
                                     if raw_json.strip().endswith("}") is False:
                                          if raw_json.strip().endswith("]"):
-                                             pass # valid end
+                                             pass 
                                          else:
-                                             pass # The AI *should* have managed this, but we can't easily guess missing structure.
-                                             # For the specific error "expecting ',' delimiter", the re.sub above usually fixes it.
-
-                                    try:
-                                        data = json.loads(raw_json)
-                                    except json.JSONDecodeError:
-                                        # Emergency Repair for "Expecting ',' delimiter"
-                                        # Sometimes key-value pairs miss a comma: "key": "val" "key2": "val"
-                                        # This is risky regex but helps in emergency
-                                        raw_json = re.sub(r'\"\s*\"', '", "', raw_json)
-                                        data = json.loads(raw_json)
-
-                                    items = data.get("news_items", [])
+                                             # Try closing the main object if it ends abruptly
+                                             if not raw_json.strip().endswith(('"', ',', '}', ']')):
+                                                  raw_json += '"' # Close string?
+                                             if raw_json.count('{') > raw_json.count('}'):
+                                                 raw_json += '}]}' # Attempt to close
+                                    
+                                    # Parse with strict=False to allow control characters
+                                    data = json.loads(raw_json, strict=False)
+                                    
+                                    # Handle list output instead of dict
+                                    if isinstance(data, list):
+                                        items = data
+                                    else:
+                                        items = data.get("news_items", [])
+                                        
                                     all_extracted_items.extend(items)
                                     
                                     log_container.success(f"✅ [Part {i+1}] Extracted {len(items)} items using '{key_used}'.")
