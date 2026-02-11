@@ -356,36 +356,50 @@ if submitted:
                 log_expander = st.expander("🛠️ Live ETL Logs", expanded=True)
                 log_container = log_expander.container()
                 
-                def repair_json_content(json_str):
+                def extract_valid_objects(text):
                     """
-                    Robust JSON repair for common LLM syntax errors.
+                    Nuclear Option: Manually extract valid JSON objects from a potentially broken string.
+                    Scans the text for {...} blocks and tries to parse them individually.
                     """
-                    # 0. Strip leading/trailing non-json junk that might have slipped through
-                    json_str = json_str.strip()
+                    valid_items = []
+                    brace_stack = []
+                    start_index = -1
                     
-                    # 1. Fix missing commas between objects: } { -> }, {
-                    json_str = re.sub(r'\}\s*\{', '}, {', json_str)
+                    # specific patch for the "Expecting property name" error (trailing commas)
+                    text = re.sub(r',\s*\}', '}', text)
+                    text = re.sub(r',\s*\]', ']', text)
                     
-                    # 2. Fix missing commas between array items: ] [ -> ], [
-                    json_str = re.sub(r'\]\s*\[', '], [', json_str)
-                    
-                    # 3. Fix Trailing Commas: , } -> } and , ] -> ]
-                    # This is the most likely cause of "Expecting property name" errors
-                    json_str = re.sub(r',\s*\}', '}', json_str)
-                    json_str = re.sub(r',\s*\]', ']', json_str)
-
-                    # 4. Fix missing commas between key-value pairs
-                    # Pattern: "val" "key": -> "val", "key":
-                    json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
-                    
-                    # 5. Fix missing commas after literals (numbers, true, false, null)
-                    json_str = re.sub(r'(\d+|true|false|null)\s*\n\s*\"', r'\1, "', json_str)
-                    
-                    # 6. Fix Missing Colons (The "Expecting :" error)
-                    # Pattern: "key" "value" -> "key": "value"
-                    json_str = re.sub(r'\"([a-zA-Z0-9_]+)\"\s+\"([^\"]+)\"', r'"\1": "\2"', json_str)
-                    
-                    return json_str
+                    for i, char in enumerate(text):
+                        if char == '{':
+                            if not brace_stack:
+                                start_index = i
+                            brace_stack.append(char)
+                        elif char == '}':
+                            if brace_stack:
+                                brace_stack.pop()
+                                if not brace_stack:
+                                    # We found a complete {...} block
+                                    candidate = text[start_index:i+1]
+                                    try:
+                                        # Attempt to parse this single object
+                                        obj = json.loads(candidate)
+                                        # Check if it's a news item (has 'category' or 'event_summary')
+                                        if isinstance(obj, dict) and ('category' in obj or 'event_summary' in obj):
+                                            valid_items.append(obj)
+                                        # Check if it's the wrapper {"news_items": [...]}
+                                        elif isinstance(obj, dict) and 'news_items' in obj:
+                                            valid_items.extend(obj['news_items'])
+                                    except:
+                                        # If specific object fails, try regex repair on it
+                                        try:
+                                            # localized repair
+                                            fixed = re.sub(r'\"\s*\n\s*\"', '", "', candidate) 
+                                            fixed = re.sub(r'(\d+|true|false|null)\s*\n\s*\"', r'\1, "', fixed)
+                                            obj = json.loads(fixed)
+                                            if isinstance(obj, dict): valid_items.append(obj)
+                                        except:
+                                            pass
+                    return valid_items
 
                 for i, chunk in enumerate(chunks):
                     # 1. Build context for this chunk
@@ -426,39 +440,25 @@ if submitted:
                                          match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
                                          if match: raw_json = match.group(1).strip()
                                     
-                                    # Layer 2: Fallback to first '{' and last '}'
-                                    if not raw_json.startswith("{"):
-                                        match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
-                                        if match: raw_json = match.group(1).strip()
-                                    
-                                    # Layer 3: Clean up potentially trailing junk
+                                    # Layer 2: Clean up potentially trailing junk
                                     if raw_json.endswith("```"):
                                         raw_json = raw_json[:-3].strip()
 
-                                    # Layer 4: Structural Repair (Aggressive)
-                                    raw_json = repair_json_content(raw_json)
+                                    # NUCLEAR OPTION: Extract Valid Objects
+                                    # Instead of trying to repair the whole string (which fails on truncation),
+                                    # we scan and save every valid object we can find.
+                                    extracted_items = extract_valid_objects(raw_json)
                                     
-                                    # Layer 5: Ensure brackets are balanced/closed if truncated
-                                    if raw_json.strip().endswith("}") is False:
-                                         if raw_json.strip().endswith("]"):
-                                             pass 
-                                         else:
-                                             # Try closing the main object if it ends abruptly
-                                             if not raw_json.strip().endswith(('"', ',', '}', ']')):
-                                                  raw_json += '"' # Close string?
-                                             if raw_json.count('{') > raw_json.count('}'):
-                                                 raw_json += '}]}' # Attempt to close
-                                    
-                                    # Parse with strict=False to allow control characters
-                                    data = json.loads(raw_json, strict=False)
-                                    
-                                    # Handle list output instead of dict
-                                    if isinstance(data, list):
-                                        items = data
+                                    if extracted_items:
+                                        all_extracted_items.extend(extracted_items)
+                                        log_container.success(f"✅ [Part {i+1}] Salvaged {len(extracted_items)} items using '{key_used}'.")
+                                        st.toast(f"✅ Part {i+1} successful.")
+                                        break # Success
                                     else:
-                                        items = data.get("news_items", [])
-                                        
-                                    all_extracted_items.extend(items)
+                                        raise ValueError("No valid JSON objects found after Nuclear Extraction.")
+                                    
+                                except Exception as json_err:
+                                    log_container.error(f"⚠️ JSON Extraction Failed on Trial {attempt}: {json_err}")
                                     
                                     log_container.success(f"✅ [Part {i+1}] Extracted {len(items)} items using '{key_used}'.")
                                     st.toast(f"✅ Part {i+1} successful.")
