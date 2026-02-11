@@ -58,10 +58,17 @@ class GeminiClient:
         # 3. Execute Request
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={key_value}"
         headers = {'Content-Type': 'application/json'}
+        
+        # Enforce JSON generation and max tokens
         payload = {
             "contents": [{
                 "parts": [{"text": prompt}]
-            }]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 8192,
+                "temperature": 0.1,
+                "responseMimeType": "application/json"
+            }
         }
         
         try:
