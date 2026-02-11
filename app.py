@@ -345,6 +345,10 @@ if submitted:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
+                # --- LIVE LOGS ---
+                log_expander = st.expander("🛠️ Live Execution Logs", expanded=True)
+                log_container = log_expander.container()
+
                 for i, chunk in enumerate(chunks):
                     # 1. Build Prompt (Intermediate vs Final)
                     p = build_chunk_prompt(chunk, i, len(chunks), system_instruction, previous_findings)
@@ -355,13 +359,20 @@ if submitted:
                     
                     progress_bar.progress((i) / (len(chunks) if len(chunks) > 0 else 1))
                     
-                    # 2. Execute with Greedy Rotation & Retry
+                    # 2. Execute with Relentless Rotation & Retry
+                    attempt = 0
                     with st.spinner(f"AI Analyst: {status_msg}"):
                         while True:
+                            attempt += 1
+                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Requesting...")
+                            
                             res = ai_client.generate_content(p, config_id=selected_model)
                             
                             if res['success']:
                                 content = res['content']
+                                key_used = res.get('key_name', 'Unknown')
+                                log_container.success(f"✅ [Part {i+1}] Success using '{key_used}'.")
+                                
                                 if i < last_idx:
                                     # Intermediate: Extract findings from [[MEMORY_BLOCK]]
                                     memory_match = re.search(r"\[\[MEMORY_BLOCK\]\](.*?)(\[\[|$)", content, re.DOTALL)
@@ -383,13 +394,17 @@ if submitted:
                                 # Failure: Check if Rate Limit (Wait)
                                 err_msg = res['content']
                                 wait_sec = res.get('wait_seconds', 0)
+                                
                                 if wait_sec > 0:
-                                    st.warning(f"⏳ All keys exhausted. Resting for {int(wait_sec)}s...")
+                                    log_container.warning(f"⏳ Rate Limit hit on all keys. Resting {int(wait_sec)}s...")
                                     time.sleep(wait_sec)
                                     continue # Retry same chunk
                                 else:
-                                    st.error(f"❌ Part {i+1} Failed: {err_msg}")
-                                    st.stop() # Fatal
+                                    # RELENTLESS RETRY for transient errors (500, 503, etc.)
+                                    log_container.error(f"❌ Trial {attempt} failed: {err_msg}")
+                                    log_container.info("🔄 Relentless Rotation: Waiting 5s and trying next available key...")
+                                    time.sleep(5)
+                                    continue # Retry with next key automatically (GeminiClient calls KeyManager.get_key)
                 
                 progress_bar.progress(1.0)
                 status_text.empty()
