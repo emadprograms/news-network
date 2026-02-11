@@ -344,7 +344,8 @@ class KeyManager:
             
             if wait == 0:
                 self.available_keys.extendleft(reversed(rotation)) 
-                self.available_keys.append(key_val) 
+                # Key is NOT added back to available_keys here. 
+                # It will be added back by report_usage() or report_failure() after serve.
                 return self.key_to_name[key_val], key_val, 0.0, target_model_id
             
             best_wait = min(best_wait, wait)
@@ -523,9 +524,7 @@ class KeyManager:
             return
             
         # V8 FIX: No more strikes. Just a temporary cooldown/penalty.
-        # We treat every 429 as a "wait 60 seconds" event for this specific key.
         penalty = 60 
-        
         self.cooldown_keys[key] = time.time() + penalty
         
         try:

@@ -129,7 +129,8 @@ class GeminiClient:
                 self.key_manager.report_failure(key_value)
                 return {
                     "success": False,
-                    "content": "Rate limit exceeded (429). Key rotated.",
+                    "content": "Rate limit exceeded (429). Key rotated to cooldown (60s).",
+                    "wait_seconds": 60, # Signal to UI to wait or rotate
                     "model_used": model_id,
                     "key_name": key_name
                 }
