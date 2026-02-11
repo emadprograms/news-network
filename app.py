@@ -317,7 +317,8 @@ if submitted:
             st.code(preview_text, language="text")
 
         # B. CHUNK DATA
-        chunks = chunk_data(st.session_state['news_data'], max_tokens=220000)
+        # REDUCED CHUNK SIZE: 220k -> 50k to prevent output truncation (JSON limit ~8k tokens)
+        chunks = chunk_data(st.session_state['news_data'], max_tokens=50000)
         
         if len(chunks) > 1:
             st.toast(f"Data too large for one prompt. Split into {len(chunks)} parts.")
@@ -366,12 +367,23 @@ if submitted:
                     json_str = re.sub(r'\]\s*\[', '], [', json_str)
                     
                     # 3. Fix missing commas after string values: "val" "key" -> "val", "key"
-                    # We use a negative lookbehind to ensure we don't match ": " inside an object
-                    json_str = re.sub(r'\"\s*\"', '", "', json_str)
-                    
+                    # Safer: Look for a closing quote, whitespace, and an opening quote that starts a new key or value
+                    # But we must avoid breaking "key": "value"
+                    # So we look for " " NOT followed by :
+                    try:
+                        # Quick hack for "key": "val" "key2": "val" -> "val", "key2"
+                        # We look for: " <newline> "
+                        json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
+                    except:
+                        pass
+
                     # 4. Fix missing commas after literals (numbers, true, false, null)
-                    # 123 "key" -> 123, "key"
                     json_str = re.sub(r'(\d+|true|false|null)\s*\"', r'\1, "', json_str)
+                    
+                    # 5. Fix Missing Colons (The "Expecting :" error)
+                    # Pattern: "key" "value" -> "key": "value"
+                    # This happens when the AI writes: "category" "EARNINGS"
+                    json_str = re.sub(r'\"([a-zA-Z0-9_]+)\"\s+\"([^\"]+)\"', r'"\1": "\2"', json_str)
                     
                     return json_str
 
