@@ -407,7 +407,8 @@ if submitted:
                     with st.spinner(f"ETL Engine: {status_msg}"):
                         while True:
                             attempt += 1
-                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Extraction in progress...")
+                            token_est = km.estimate_tokens(p) if km else "N/A"
+                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
                             
                             res = ai_client.generate_content(p, config_id=selected_model)
                             
