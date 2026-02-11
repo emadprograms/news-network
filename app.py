@@ -301,14 +301,19 @@ if submitted:
         # --- INSTANT PREVIEW (REQUESTED) ---
         items = st.session_state['news_data']
         st.success(f"📦 Data Fetch Complete: {len(items)} news items found.")
-        with st.expander("📋 Emergency Copiable Headline Preview", expanded=True):
-            preview_text = f"TOTAL NEWS QUANTITY: {len(items)}\n\n"
+        with st.expander("📋 Emergency Copiable Raw Data Backup", expanded=True):
+            preview_text = f"TOTAL NEWS QUANTITY: {len(items)}\n"
+            preview_text += "=== START RAW DATA DUMP ===\n\n"
+            
             for idx, item in enumerate(items):
                 t = item.get('time', 'N/A')
                 title = item.get('title', 'No Title')
-                preview_text += f"{idx+1}. [{t}] {title}\n"
+                body = " ".join(clean_content(item.get('content', [])))
+                preview_text += f"ITEM {idx+1}:\n[{t}] {title}\n{body}\n\n"
             
-            st.info("💡 Copy the headlines below for safe-keeping while the AI processes.")
+            preview_text += "=== END RAW DATA DUMP ==="
+            
+            st.info("💡 Copy the raw data below for safe-keeping. This is the exact text being processed by the AI.")
             st.code(preview_text, language="text")
 
         # B. CHUNK DATA
