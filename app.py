@@ -484,26 +484,42 @@ if st.session_state['data_loaded']:
             parsed_data = json.loads(st.session_state['ai_report'])
             items = parsed_data.get("news_items", [])
             
-            # 2. Neat Table View (Primary)
+            # 2. Rich Report View (Primary)
             if items:
-                st.markdown("### 📋 Executive Summary Table")
-                # Flatten hard_data for the table view
-                df_rows = []
-                for it in items:
-                    row = {
-                        "Category": it.get("category", "OTHER"),
-                        "Primary Entity": it.get("primary_entity", "N/A"),
-                        "Summary": it.get("event_summary", "N/A"),
-                        "Hard Data": str(it.get("hard_data", {})),
-                        "Sentiment": it.get("sentiment_indicated", "N/A")
-                    }
-                    df_rows.append(row)
+                st.markdown("### 📋 Intelligence Report")
                 
-                df = pd.DataFrame(df_rows)
-                st.dataframe(df, use_container_width=True)
+                for it in items:
+                    with st.container():
+                        # Header: Category & Sentiment
+                        cat = it.get("category", "OTHER").upper()
+                        sent = it.get("sentiment_indicated", "NEUTRAL").upper()
+                        
+                        col_h1, col_h2 = st.columns([1, 1])
+                        with col_h1:
+                            st.caption(f"CATEGORY: **{cat}**")
+                        with col_h2:
+                            sentiment_icon = "⚪"
+                            if "BULLISH" in sent or "POSITIVE" in sent: sentiment_icon = "🟢"
+                            elif "BEARISH" in sent or "NEGATIVE" in sent: sentiment_icon = "🔴"
+                            st.markdown(f"<div style='text-align: right;'>{sentiment_icon} {sent}</div>", unsafe_allow_html=True)
+                        
+                        # Content
+                        st.subheader(it.get("primary_entity", "N/A"))
+                        st.write(it.get("event_summary", "No summary provided."))
+                        
+                        # Hard Data Metrics
+                        hard_data = it.get("hard_data", {})
+                        if hard_data:
+                            st.markdown("**📊 Key Metrics & Data Points:**")
+                            cols = st.columns(len(hard_data) if len(hard_data) > 0 else 1)
+                            for idx, (k, v) in enumerate(hard_data.items()):
+                                with cols[idx % len(cols)]:
+                                    st.metric(label=k.replace("_", " ").title(), value=str(v))
+                        
+                        st.divider()
             
             # 3. Interactive JSON Tree (Secondary)
-            with st.expander("🔍 View Full JSON Structure"):
+            with st.expander("🔍 View Machine-Readable JSON Structure"):
                 st.json(parsed_data)
                 
         except Exception as e:
