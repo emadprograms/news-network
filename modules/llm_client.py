@@ -42,6 +42,7 @@ class GeminiClient:
             return {
                 "success": False,
                 "content": f"Rate limit reached. Please wait {int(wait_time)} seconds.",
+                "wait_seconds": wait_time,
                 "model_used": model_id,
                 "key_name": "N/A"
             }

@@ -177,26 +177,28 @@ def build_prompt_from_items(items, system_instruction):
         
     return f"{system_instruction}\n\n=== MARKET DATA ===\n{context_blob}"
 
-def build_chunk_prompt(chunk, index, total, system_instruction):
+def build_chunk_prompt(chunk, index, total, system_instruction, previous_findings=None):
     """Builds a prompt for a specific chunk with explicit Part X of Y instructions."""
     if total == 1:
         return build_prompt_from_items(chunk, system_instruction)
     
-    # 0-indexed vs 1-indexed conversion
-    # index is 0-based. total is 1-based count.
-    # index 0 is Part 1. index (total-1) is Part (total) == LAST.
-    
+    # index is 0-based, total is count. Example: index 0 of 2 is NOT last.
     is_last_part = (index + 1) == total
     
     if is_last_part:
         # FINAL PART PROMPT
+        history_text = ""
+        if previous_findings:
+            history_text = "\n\n=== PREVIOUS FINDINGS (Do not repeat, just synthesize) ===\n" + "\n---\n".join(previous_findings)
+
         system_notice = (
             f" SYSTEM NOTICE: This is PART {index+1} of {total} (FINAL PART).\n"
             f" INSTRUCTIONS:\n"
             f" 1. Analyze this final dataset.\n"
-            f" 2. Combine findings from this part with all previous parts (if available).\n"
+            f" 2. Combine findings from this part with the PREVIOUS FINDINGS provided below.\n"
             f" 3. GENERATE THE FINAL COMPREHENSIVE REPORT NOW.\n"
             f" {system_instruction}"
+            f"{history_text}"
         )
     else:
         # INTERMEDIATE PART PROMPT (Stealth Extraction)
@@ -337,68 +339,64 @@ if submitted:
                 st.error("AI Client unavailable.")
             else:
                 final_output = ""
+                previous_findings = []
+                last_idx = len(chunks) - 1
                 
-                # CASE 1: Single Chunk (Direct)
-                if len(chunks) == 1:
-                    full_prompt = build_chunk_prompt(chunks[0], 0, 1, system_instruction)
-                    with st.spinner(f"2/3 Analyzing {len(chunks[0])} items with {selected_model}..."):
-                        result = ai_client.generate_content(full_prompt, config_id=selected_model)
-                        if result['success']:
-                            final_output = result['content']
-                        else:
-                            st.error(f"Analysis Failed: {result['content']}")
-                            
-                # CASE 2: Multiple Chunks (Map-Reduce)
-                else:
-                    summaries = []
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for i, chunk in enumerate(chunks):
+                    # 1. Build Prompt (Intermediate vs Final)
+                    p = build_chunk_prompt(chunk, i, len(chunks), system_instruction, previous_findings)
                     
-                    # MAP PHASE
-                    for i, chunk in enumerate(chunks):
-                        # RATE LIMIT ENFORCEMENT
-                        if i > 0:
-                            for s in range(60, 0, -1):
-                                status_text.info(f"⏳ Rate Limit Cooldown: Resuming in {s} seconds...")
-                                time.sleep(1)
-                        
-                        status_text.text(f"Processing Part {i+1}/{len(chunks)}...")
-                        progress_bar.progress((i) / len(chunks))
-                        
-                        with st.spinner(f"2/3 Processing Part {i+1}/{len(chunks)} ({len(chunk)} items)..."):
-                             # Use the shared helper
-                             p = build_chunk_prompt(chunk, i, len(chunks), system_instruction)
-                             
-                             res = ai_client.generate_content(p, config_id=selected_model)
-                             if res['success']:
-                                 summaries.append(f"--- PART {i+1} SUMMARY ---\n{res['content']}")
-                             else:
-                                 st.error(f"Part {i+1} Failed: {res['content']}")
-                        
-                    progress_bar.progress(1.0)
-                    status_text.empty()
+                    status_msg = f"Processing Part {i+1}/{len(chunks)}..."
+                    if i == last_idx:
+                        status_msg = "🏆 Synthesizing Final Report..."
                     
-                    # REDUCE PHASE
-                    if summaries:
-                        if len(chunks) > 1:
-                             for s in range(60, 0, -1):
-                                st.info(f"⏳ Final Cooldown: Synthesis in {s} seconds...")
-                                time.sleep(1)
-                                
-                        with st.spinner("3/3 Synthesizing Final Report..."):
-                            combined_summaries = "\n\n".join(summaries)
-                            reduce_prompt = (
-                                f"{system_instruction}\n\n"
-                                "Here are the intermediate summaries from analyzing the data in parts. "
-                                "Synthesize them into one final, cohesive intelligence report.\n\n"
-                                f"=== INTERMEDIATE DATA ===\n{combined_summaries}"
-                            )
+                    progress_bar.progress((i) / (len(chunks) if len(chunks) > 0 else 1))
+                    
+                    # 2. Execute with Greedy Rotation & Retry
+                    with st.spinner(f"AI Analyst: {status_msg}"):
+                        while True:
+                            res = ai_client.generate_content(p, config_id=selected_model)
                             
-                            final_res = ai_client.generate_content(reduce_prompt, config_id=selected_model)
-                            if final_res['success']:
-                                final_output = final_res['content']
+                            if res['success']:
+                                content = res['content']
+                                if i < last_idx:
+                                    # Intermediate: Extract findings from [[MEMORY_BLOCK]]
+                                    memory_match = re.search(r"\[\[MEMORY_BLOCK\]\](.*?)(\[\[|$)", content, re.DOTALL)
+                                    if memory_match:
+                                        findings = memory_match.group(1).strip()
+                                        if findings:
+                                            previous_findings.append(findings)
+                                    else:
+                                        # Fallback: take entire content if block missing
+                                        previous_findings.append(content)
+                                    
+                                    st.toast(f"✅ Part {i+1} received. Rotating keys...")
+                                else:
+                                    # Final: Store result
+                                    final_output = content
+                                break # Success, move to next chunk
+                            
                             else:
-                                st.error(f"Final Synthesis Failed: {final_res['content']}")
+                                # Failure: Check if Rate Limit (Wait)
+                                err_msg = res['content']
+                                wait_sec = res.get('wait_seconds', 0)
+                                if wait_sec > 0:
+                                    st.warning(f"⏳ All keys exhausted. Resting for {int(wait_sec)}s...")
+                                    time.sleep(wait_sec)
+                                    continue # Retry same chunk
+                                else:
+                                    st.error(f"❌ Part {i+1} Failed: {err_msg}")
+                                    st.stop() # Fatal
+                
+                progress_bar.progress(1.0)
+                status_text.empty()
+                
+                if final_output:
+                    st.session_state['ai_report'] = final_output
+                    st.balloons()
                 
                 if final_output:
                     st.session_state['ai_report'] = final_output
