@@ -1,58 +1,56 @@
 # System Architecture
 
 ## Overview
-The **Grandmaster News Network** is a real-time market intelligence dashboard built with Streamlit. It aggregates news from a Turso database and presents it in a high-density, trader-focused UI. Security is managed via Infisical to ensure database credentials are never hardcoded.
+The **News Network Analysis** is a high-fidelity intelligence engine designed to convert unstructured news data into structured, machine-readable JSON datasets. It uses a Map-Reduce Map-Reduce strategy with Google's Gemini API to process high volumes of news text, implementing "Relentless Key Rotation" to bypass rate limits.
 
 ## High-Level Architecture
 
 ```mermaid
 graph TD
-    User[User / Trader] -->|HTTPS| App[Streamlit App (app.py)]
+    User[User / Analyst] -->|HTTPS| App[Streamlit App (app.py)]
     
-    subgraph "Application Layer"
-        App -->|UI Rendering| Frontend[Streamlit Frontend]
-        App -->|Data Fetching| DBClient[modules.db_client]
-        App -->|Secret Injection| Infisical[Infisical SDK]
+    subgraph "Intelligence Layer (AI ETL)"
+        App -->|Chunked Text| LLM[modules.llm_client]
+        LLM -->|Request| Gemini[Gemini 1.5/2.0 API]
+        App -->|Key Request| KM[modules.key_manager]
+        KM -->|Success/Failure Report| KM
     end
     
     subgraph "Infrastructure"
-        Infisical -->|Fetch Secrets| InfisicalCloud[Infisical Cloud]
-        DBClient -->|Query Data| Turso[Turso Database (LibSQL)]
+        App -->|Secret Injection| Infisical[Infisical SDK]
+        App -->|Query Headlines| NewsDB[Turso: NewsDatabase]
+        KM -->|Manage Quotas| KeyDB[Turso: Analyst Workbench]
     end
     
-    InfisicalCloud -.->|Credentials (URL, Token)| App
-    Turso -.->|News Items| App
+    Infisical -.->|Credentials| App
+    NewsDB -.->|Raw News| App
+    Gemini -.->|Structured JSON| App
 ```
 
 ## Key Components
 
-### 1. Frontend (Streamlit)
-- **Entry Point**: `app.py`
-- **UI Elements**: 
-    - **Control Panel**: Expandable section for Time Travel filters and Export tools.
-    - **News Ticker**: CSS-animated scrolling headline bar.
-    - **Tabs**: Categorized views for "Global Headlines", "Stocks News", and "Company News".
-- **Styling**: Custom CSS injection for a "Dark Mode" financial terminal aesthetic.
+### 1. AI Extraction Engine (Map-Reduce)
+- **Map Phase**: High-volume news data is split into ~220k token chunks. Each chunk is processed by the AI with a **Strict ETL Prompt** to extract discrete facts, metrics, and entities.
+- **Aggregation Phase**: Extracted JSON objects are recovered (via multi-layered regex repair), aggregated into a master list, and presented as a high-fidelity report.
 
-### 2. Backend Logic
-- **Database Client** (`modules/db_client.py`):
-    - Wraps the `libsql_client`.
-    - Handles connection initialization and error containment.
-    - Provides specific methods like `fetch_news_range` and `fetch_news_by_date`.
-- **Secret Management**:
-    - **Provider**: Infisical.
-    - **Integration**: `infisicalsdk` is initialized at startup.
-    - **Workflow**: The app authenticates with Infisical using a Client ID/Secret from `secrets.toml`, then retrieves the production Database URL and Auth Token dynamically. The app cannot connect to the database without this successful handshake.
+### 2. Relentless Key Rotation (`KeyManager`)
+- **Multi-Database Handshake**: The system connects to two Turso databases. One for news content, and the **Analyst Workbench** for managing a pool of AI API keys.
+- **Dynamic Rotation**: If an API key hits a rate limit (429) or transient error (500/503), the `KeyManager` instantly rotates to the next available priority key.
+- **Reporting**: Success and failure signals are reported back to the database in real-time to manage quotas across sessions.
 
-### 3. Data Storage (Turso)
-- **Database**: LibSQL (SQLite compatible) hosted on Turso.
-- **Data Model**: Stores news articles with timestamps, categories, and source metadata.
+### 3. Frontend (Streamlit)
+- **Analyst Control Panel**: Top-level form for time-travel, model selection, and execution mode (ETL vs Dry Run).
+- **Instant Preview**: Immediately displays a full raw text backup (headline + body) the moment data is fetched, ensuring zero data loss if processing is interrupted.
+- **Results Engine**: 
+    - **Executive Summary Table**: A clean, spreadsheet-style view of extracted intelligence.
+    - **Interactive JSON Tree**: Deep drill-down for programmatic data consumers.
+    - **Copy-to-Clipboard**: Built-in 1-click copy for the entire JSON dataset.
 
 ## Security Model
-- **Zero Hardcoded Secrets**: Database credentials do not exist in the codebase or standard config files.
-- **Identity**: The application uses a Universal Auth identity to authenticate with Infisical.
-- **Environment**: Secrets are fetched for the specific environment (e.g., `dev`) defined in the code.
+- **Secret Management**: Powered by Infisical. All database URLs, Auth Tokens, and key identifiers are injected at runtime.
+- **Zero Hardcoding**: Credentials for both the News and Management databases are never stored in the environment or codebase.
 
-## Deployment
-- The application is stateless and can be deployed on any containerized environment (Docker) or PaaS (Streamlit Cloud, Heroku) that supports Python 3.12+.
-- **Requirements**: `requirements.txt` includes all necessary packages (`streamlit`, `infisicalsdk`, `libsql-client`).
+## Resilience Features
+- **300s API Timeouts**: Optimized for heavy extraction tasks.
+- **Robust JSON Recovery**: 5-layer recovery strategy (Markdown cleaning -> Brace search -> Whitespace stripping -> Missing comma injection -> Regex repair).
+- **Safety Filter Detection**: Explicit monitoring of AI safety-block reasons to assist in ETL debugging.
