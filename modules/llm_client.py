@@ -65,7 +65,7 @@ class GeminiClient:
         }
         
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response = requests.post(url, json=payload, headers=headers, timeout=300)
             
             if response.status_code == 200:
                 data = response.json()
