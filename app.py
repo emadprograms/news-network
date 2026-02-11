@@ -5,6 +5,7 @@ import re
 from modules.db_client import NewsDatabase
 from modules.key_manager import KeyManager
 from modules.llm_client import GeminiClient
+from modules.text_optimizer import optimize_json_for_synthesis
 from infisical_sdk import InfisicalSDKClient
 import json
 
@@ -490,12 +491,52 @@ if submitted:
                 status_text.empty()
                 
                 if all_extracted_items:
+                    # 1. Save Structured JSON for the User
                     final_dataset = {"news_items": all_extracted_items, "total_entities": len(all_extracted_items)}
                     st.session_state['ai_report'] = json.dumps(final_dataset, indent=2)
+                    st.session_state['json_data'] = all_extracted_items # Ensure this is set for optimization
                     st.balloons()
 
+                    # 2. RUN FINAL ANALYTICAL SYNTHESIS (Use Token-Optimized Text)
+                    st.divider()
+                    st.subheader("🤖 AI Market Analyst Report")
+                    
+                    # OPTIMIZATION: Transform JSON to Dense Text
+                    optimized_text = optimize_json_for_synthesis(all_extracted_items)
+                    
+                    with st.expander("🔍 View Optimized Token-Light Input (For AI Analysis)", expanded=False):
+                        st.text(optimized_text)
+                    
+                    final_prompt = f"""
+                    You are a Senior Market Analyst. 
+                    Review the following consolidated news feed (organized by Entity) and generate a comprehensive market report.
+                    
+                    This input is highly optimized to save tokens. It is grouped by ENTITY.
+                    
+                    OBJECTIVE:
+                    Synthesize the diverse news items into a coherent narrative.
+                    
+                    Focus on:
+                    1. 🚨 Major Earnings Beats/Misses for Key Players
+                    2. 🕵️‍♂️ Significant Insider Moves (Clusters of buying/selling)
+                    3. 📉 Analyst Sentiment Shifts (Upgrades/Downgrades)
+                    4. 🌍 Macro Trends & Sector Rotations
+                    
+                    Do NOT just list the news again. Connect the dots.
+                    
+                    DATA:
+                    {optimized_text}
+                    """
+                    
+                    with st.spinner("🤖 Writing Final Report..."):
+                         # We use a separate key/call for this to ensure we have quota
+                        final_res = gemini_client.generate_content(final_prompt)
+                        if final_res['success']:
+                            st.markdown("### 📝 Consolidated Market Analysis")
+                            st.markdown(final_res['content'])
+                        else:
+                            st.error(f"Failed to generate final report: {final_res['content']}")
 
-# 4. RESULTS DISPLAY
 if st.session_state['data_loaded']:
     st.divider()
     
