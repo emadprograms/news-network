@@ -63,25 +63,41 @@ def get_db_connection():
             client_secret=infisical_secrets["client_secret"]
         )
         
-        db_url_secret = infisical.secrets.get_secret_by_name(
+        # 1. News Database (Headed for data)
+        news_url = infisical.secrets.get_secret_by_name(
             secret_name="turso_emadarshadalam_newsdatabase_DB_URL",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
         ).secretValue
         
-        db_token_secret = infisical.secrets.get_secret_by_name(
+        news_token = infisical.secrets.get_secret_by_name(
             secret_name="turso_emadarshadalam_newsdatabase_AUTH_TOKEN",
+            project_id=infisical_secrets["project_id"],
+            environment_slug="dev",
+            secret_path="/"
+        ).secretValue
+
+        # 2. Key Manager Database (Headed for keys)
+        km_url = infisical.secrets.get_secret_by_name(
+            secret_name="turso_emadprograms_analystworkbench_DB_URL",
+            project_id=infisical_secrets["project_id"],
+            environment_slug="dev",
+            secret_path="/"
+        ).secretValue
+        
+        km_token = infisical.secrets.get_secret_by_name(
+            secret_name="turso_emadprograms_analystworkbench_AUTH_TOKEN",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
         ).secretValue
         
         db = NewsDatabase(
-            db_url_secret.replace("libsql://", "https://"),
-            db_token_secret
+            news_url.replace("libsql://", "https://"),
+            news_token
         )
-        return db, db_url_secret, db_token_secret
+        return db, km_url, km_token
         
     except Exception as e:
         st.error(f"Failed to initialize DB/Keys: {e}")
