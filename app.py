@@ -475,13 +475,14 @@ if submitted:
                             else:
                                 # Failure: Rate Limit or Transient
                                 err_msg = res['content']
+                                failed_key = res.get('key_name', 'Unknown')
                                 wait_sec = res.get('wait_seconds', 0)
                                 if wait_sec > 0:
-                                    log_container.warning(f"⏳ Quota hit. Resting {int(wait_sec)}s...")
+                                    log_container.warning(f"⏳ Quota hit for '{failed_key}'. Resting {int(wait_sec)}s...")
                                     time.sleep(wait_sec)
                                     continue
                                 else:
-                                    log_container.error(f"❌ Trial {attempt} failed: {err_msg}")
+                                    log_container.error(f"❌ Trial {attempt} failed using '{failed_key}': {err_msg}")
                                     time.sleep(5)
                                     continue 
                 
