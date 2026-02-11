@@ -388,8 +388,19 @@ if submitted:
                     
                     return json_str
 
-                for i, chunk in enumerate(chunks):
-                    # 1. Build context for this chunk
+                # --- PARALLEL EXECUTION LOGIC ---
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def extract_chunk_worker(chunk_data):
+                    """
+                    Worker function to process a single chunk in a separate thread.
+                    Returns: (success, items, log_messages)
+                    """
+                    i, chunk, total_chunks = chunk_data
+                    worker_logs = []
+                    extracted_items = []
+                    
+                    # 1. Build context
                     context_for_prompt = ""
                     for item in chunk:
                         t = item.get('time', 'N/A')
@@ -397,19 +408,20 @@ if submitted:
                         body = " ".join(clean_content(item.get('content', [])))
                         context_for_prompt += f"[{t}] {title}\n{body}\n\n"
 
-                    p = build_chunk_prompt(chunk, i, len(chunks), context_for_prompt)
-                    
-                    status_msg = f"Extracting Data Part {i+1}/{len(chunks)}..."
-                    progress_bar.progress((i) / (len(chunks) if len(chunks) > 0 else 1))
+                    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt)
                     
                     # 2. Execute with Relentless Rotation & Retry
                     attempt = 0
-                    with st.spinner(f"ETL Engine: {status_msg}"):
-                        while True:
-                            attempt += 1
+                    max_attempts = 5 # Avoid infinite loops in threads
+                    
+                    while attempt < max_attempts:
+                        attempt += 1
+                        try:
+                            # Token Est
                             token_est = km.estimate_tokens(p) if km else "N/A"
-                            log_container.write(f"🔹 [Part {i+1}/{len(chunks)}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
+                            worker_logs.append(f"🔹 [Part {i+1}/{total_chunks}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
                             
+                            # API Call
                             res = ai_client.generate_content(p, config_id=selected_model)
                             
                             if res['success']:
@@ -417,76 +429,82 @@ if submitted:
                                 key_used = res.get('key_name', 'Unknown')
                                 
                                 # --- ROBUST JSON EXTRACTION ---
-                                try:
-                                    raw_json = content.strip()
-                                    
-                                    # Layer 1: Markdown blocks
-                                    if "```json" in raw_json:
-                                        match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
-                                        if match: raw_json = match.group(1).strip()
-                                    elif "```" in raw_json:
-                                         match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
-                                         if match: raw_json = match.group(1).strip()
-                                    
-                                    # Layer 2: Fallback to first '{' and last '}'
-                                    if not raw_json.startswith("{"):
-                                        match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
-                                        if match: raw_json = match.group(1).strip()
-                                    
-                                    # Layer 3: Clean up potentially trailing junk
-                                    if raw_json.endswith("```"):
-                                        raw_json = raw_json[:-3].strip()
+                                raw_json = content.strip()
+                                # Layer 1-3 repairs (inline for compactness or call helper)
+                                if "```json" in raw_json:
+                                    match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
+                                    if match: raw_json = match.group(1).strip()
+                                elif "```" in raw_json:
+                                     match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
+                                     if match: raw_json = match.group(1).strip()
+                                if not raw_json.startswith("{"):
+                                    match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
+                                    if match: raw_json = match.group(1).strip()
+                                if raw_json.endswith("```"): raw_json = raw_json[:-3].strip()
+                                
+                                raw_json = repair_json_content(raw_json)
+                                
+                                # Layer 5 repair
+                                if raw_json.strip().endswith("}") is False:
+                                     if not raw_json.strip().endswith(('"', ',', '}', ']')): raw_json += '"'
+                                     if raw_json.count('{') > raw_json.count('}'): raw_json += '}]}'
 
-                                    # Layer 4: Structural Repair (Aggressive)
-                                    raw_json = repair_json_content(raw_json)
-                                    
-                                    # Layer 5: Ensure brackets are balanced/closed if truncated
-                                    if raw_json.strip().endswith("}") is False:
-                                         if raw_json.strip().endswith("]"):
-                                             pass 
-                                         else:
-                                             # Try closing the main object if it ends abruptly
-                                             if not raw_json.strip().endswith(('"', ',', '}', ']')):
-                                                  raw_json += '"' # Close string?
-                                             if raw_json.count('{') > raw_json.count('}'):
-                                                 raw_json += '}]}' # Attempt to close
-                                    
-                                    # Parse with strict=False to allow control characters
-                                    data = json.loads(raw_json, strict=False)
-                                    
-                                    # Handle list output instead of dict
-                                    if isinstance(data, list):
-                                        items = data
-                                    else:
-                                        items = data.get("news_items", [])
-                                        
-                                    all_extracted_items.extend(items)
-                                    
-                                    log_container.success(f"✅ [Part {i+1}] Extracted {len(items)} items using '{key_used}'.")
-                                    st.toast(f"✅ Part {i+1} successful.")
-                                    break # Success
-                                    
-                                except Exception as json_err:
-                                    log_container.error(f"⚠️ JSON Extraction Failed on Trial {attempt}: {json_err}")
-                                    with log_container.expander("🔍 View Raw AI Response"):
-                                        st.code(content)
-                                    log_container.info("🔄 Rotating to next key in 2s...")
-                                    time.sleep(2)
-                                    continue # Force retry with next key
-                            
+                                # Parse
+                                data = json.loads(raw_json, strict=False)
+                                if isinstance(data, list): items = data
+                                else: items = data.get("news_items", [])
+                                
+                                worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {key_used})")
+                                return (True, items, worker_logs)
+
                             else:
-                                # Failure: Rate Limit or Transient
+                                # Failure (429 or other)
                                 err_msg = res['content']
                                 failed_key = res.get('key_name', 'Unknown')
                                 wait_sec = res.get('wait_seconds', 0)
+                                
                                 if wait_sec > 0:
-                                    log_container.warning(f"⏳ Quota hit for '{failed_key}'. Resting {int(wait_sec)}s...")
-                                    time.sleep(wait_sec)
+                                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit for '{failed_key}'. Retrying with new key...")
+                                    time.sleep(1) # Small sleep, then rotate
                                     continue
                                 else:
-                                    log_container.error(f"❌ Trial {attempt} failed using '{failed_key}': {err_msg}")
-                                    time.sleep(5)
-                                    continue 
+                                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg}")
+                                    time.sleep(2)
+                                    continue
+                                    
+                        except Exception as e:
+                            worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")
+                            time.sleep(2)
+                    
+                    worker_logs.append(f"❌ [Part {i+1}] FAILED after {max_attempts} attempts.")
+                    return (False, [], worker_logs)
+
+                # --- START PARALLEL EXECUTION ---
+                max_threads = min(len(chunks), 15) # Cap at 15 threads or num chunks
+                st.info(f"🚀 Starting Parallel Extraction with {max_threads} worker threads...")
+                
+                completed_count = 0
+                
+                with ThreadPoolExecutor(max_workers=max_threads) as executor:
+                    # Submit all tasks
+                    future_to_chunk = {executor.submit(extract_chunk_worker, (i, chunk, len(chunks))): i for i, chunk in enumerate(chunks)}
+                    
+                    for future in as_completed(future_to_chunk):
+                        completed_count += 1
+                        success, items, logs = future.result()
+                        
+                        # Update UI
+                        for log_msg in logs:
+                            if "✅" in log_msg: log_container.success(log_msg)
+                            elif "❌" in log_msg: log_container.error(log_msg)
+                            elif "⏳" in log_msg: log_container.warning(log_msg)
+                            else: log_container.write(log_msg)
+                            
+                        if success:
+                            all_extracted_items.extend(items)
+                        
+                        # Update Progress
+                        progress_bar.progress(completed_count / len(chunks))
                 
                 progress_bar.progress(1.0)
                 status_text.empty()
