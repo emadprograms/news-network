@@ -608,15 +608,14 @@ if submitted:
                 progress_bar.empty()
                 
                 if all_extracted_items:
-                    # 1. Save Structured JSON for the User
+                    # Set ai_report for download button, even if not displayed
                     final_dataset = {"news_items": all_extracted_items, "total_entities": len(all_extracted_items)}
                     st.session_state['ai_report'] = json.dumps(final_dataset, indent=2)
                     st.session_state['json_data'] = all_extracted_items # Ensure this is set for optimization
-                    st.balloons()
 
-                    # 2. RUN FINAL ANALYTICAL SYNTHESIS (Use Token-Optimized Text)
+                    st.balloons()
                     st.divider()
-                    st.subheader("🤖 AI Market Analyst Report")
+                    st.subheader("✨ Optimized Token-Light Input")
                     
                     # OPTIMIZATION: Transform JSON to Dense Text
                     optimized_text = optimize_json_for_synthesis(all_extracted_items)
@@ -628,104 +627,29 @@ if submitted:
                     savings = raw_tokens - opt_tokens
                     savings_pct = (savings / raw_tokens * 100) if raw_tokens > 0 else 0
                     
-                    with st.expander("🔍 View Optimized Token-Light Input (For AI Analysis)", expanded=False):
-                        st.info(f"✨ **Token Savings**: Reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
-                        st.text(optimized_text)
+                    st.info(f"💾 **Token Savings**: Output reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
+                    st.code(optimized_text, language="text")
                     
-                    final_prompt = f"""
-                    You are a Senior Market Analyst. 
-                    Review the following consolidated news feed (organized by Entity) and generate a comprehensive market report.
-                    
-                    This input is highly optimized to save tokens. It is grouped by ENTITY.
-                    
-                    OBJECTIVE:
-                    Synthesize the diverse news items into a coherent narrative.
-                    
-                    Focus on:
-                    1. 🚨 Major Earnings Beats/Misses for Key Players
-                    2. 🕵️‍♂️ Significant Insider Moves (Clusters of buying/selling)
-                    3. 📉 Analyst Sentiment Shifts (Upgrades/Downgrades)
-                    4. 🌍 Macro Trends & Sector Rotations
-                    
-                    Do NOT just list the news again. Connect the dots.
-                    
-                    DATA:
-                    {optimized_text}
-                    """
-                    
-                    with st.spinner("🤖 Writing Final Report..."):
-                         # We use a separate key/call for this to ensure we have quota
-                        final_res = ai_client.generate_content(final_prompt, config_id=selected_model)
-                        if final_res['success']:
-                            st.markdown("### 📝 Consolidated Market Analysis")
-                            st.markdown(final_res['content'])
-                        else:
-                            st.error(f"Failed to generate final report: {final_res['content']}")
+                    st.success("✅ Process Complete. Copy the optimized text above for your manual AI analysis.")
 
 if st.session_state['data_loaded']:
     st.divider()
     
-    # Market Data Preview
+    # Market Data Preview & Download
     items = st.session_state['news_data']
-    with st.expander(f"📊 Market Data Preview ({len(items)} items found)"):
+    with st.expander(f"📊 Raw Market Data Backup ({len(items)} items found)"):
         st.json(items)
+        if st.session_state.get('ai_report'):
+            st.download_button(
+                "📥 Download Extraction JSON", 
+                st.session_state['ai_report'], 
+                file_name="extracted_news_data.json",
+                mime="application/json"
+            )
         
-    # Results Section (DataSet)
-    if st.session_state['ai_report']:
-        st.subheader("📦 Extracted Structured Dataset")
-        
-        try:
-            import json
-            import pandas as pd
-            
-            # 1. Parse Data
-            parsed_data = json.loads(st.session_state['ai_report'])
-            items = parsed_data.get("news_items", [])
-            
-            # 2. Neat Table View (Primary)
-            if items:
-                st.markdown("### 📋 Executive Summary Table")
-                # Flatten hard_data for the table view
-                df_rows = []
-                for it in items:
-                    sentiment = it.get("sentiment_indicated", "N/A")
-                    if isinstance(sentiment, list):
-                        sentiment = ", ".join(filter(None, sentiment)) if sentiment else "N/A"
-                    
-                    row = {
-                        "Category": it.get("category", "OTHER"),
-                        "Primary Entity": it.get("primary_entity", "N/A"),
-                        "Summary": it.get("event_summary", "N/A"),
-                        "Hard Data": str(it.get("hard_data", {})),
-                        "Sentiment": sentiment
-                    }
-                    df_rows.append(row)
-                
-                df = pd.DataFrame(df_rows)
-                st.dataframe(df, use_container_width=True)
-            
-            # 3. Interactive JSON Tree & Copy Option
-            with st.expander("🔍 View/Copy Full JSON Structure"):
-                st.info("💡 You can copy the JSON by clicking the icon in the top-right of the code block below.")
-                st.json(parsed_data)
-                st.divider()
-                st.caption("📋 Raw JSON (Ideal for Copying)")
-                st.code(st.session_state['ai_report'], language="json")
-                
-        except Exception as e:
-            st.error(f"Display Error: {e}")
-            st.code(st.session_state['ai_report'], language="json")
-            
-        st.download_button(
-            "📥 Download JSON Dataset", 
-            st.session_state['ai_report'], 
-            file_name="extracted_news_data.json",
-            mime="application/json"
-        )
-        
-    elif st.session_state['dry_run_prompts']:
+    # Dry Run Results
+    if st.session_state['dry_run_prompts']:
         st.subheader(f"🧪 Dry Run Result ({len(st.session_state['dry_run_prompts'])} Parts)")
-        
         tabs = st.tabs([f"Part {i+1}" for i in range(len(st.session_state['dry_run_prompts']))])
         
         for i, tab in enumerate(tabs):
@@ -734,5 +658,3 @@ if st.session_state['data_loaded']:
                 st.info(f"Part {i+1} ETL Prompt - This would be sent for extraction.")
                 st.caption(f"Estimated Tokens: {km.estimate_tokens(prompt) if km else 'N/A'}")
                 st.code(prompt, language="text")
-    
-    pass
