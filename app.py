@@ -199,7 +199,7 @@ You must output a valid JSON object containing a list of items. Use the followin
       }},
       "guidance_or_forecast": "String (Only if explicitly stated in text)",
       "quotes": ["Array of Strings (Direct quotes from key figures)"],
-      "sentiment_indicated": "String (Only if explicitly stated, e.g., 'Analyst upgraded to Buy')",
+      "sentiment_indicated": ["Array of Strings (e.g., 'Analyst upgraded to Buy', 'Weak Outlook')"],
       "is_truncated": Boolean
     }}
   ]
