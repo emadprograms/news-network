@@ -117,7 +117,7 @@ def clean_content(content_list):
         paragraphs = [re.sub(r'<[^>]+>', '', c).strip() for c in content_list if c.strip()]
     return paragraphs
 
-def chunk_data(items, max_tokens=10000): # Enforce 10k limit
+def chunk_data(items, max_tokens=30000): # Balanced Sweet Spot: 30k
     """
     Splits items into chunks. 
     Intelligent Slicing: If an individual item exceeds the limit, it is sliced 
@@ -486,8 +486,10 @@ if submitted:
             st.code(preview_text, language="text")
 
         # B. CHUNK DATA
-        # REDUCED CHUNK SIZE: 50k -> 10k for maximum fidelity and zero truncation risk
-        chunks = chunk_data(st.session_state['news_data'], max_tokens=10000)
+        # BALANCED CHUNK SIZE: 30k tokens. 
+        # Large enough for efficiency, but small enough to avoid "Lost in the Middle" syndrome.
+        # Adaptive branching will handle any 30k block that is too dense.
+        chunks = chunk_data(st.session_state['news_data'], max_tokens=30000)
         
         if len(chunks) > 1:
             st.toast(f"Data too large for one prompt. Split into {len(chunks)} parts.")
