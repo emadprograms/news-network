@@ -408,6 +408,32 @@ if submitted:
                 # --- PARALLEL EXECUTION LOGIC ---
                 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+                def salvage_json_items(text: str) -> list:
+                    """
+                    EMERGENCY FALLBACK: Hunts for individual valid JSON objects in malformed text.
+                    Look for blocks starting with {"category": and ending with }
+                    """
+                    if not text: return []
+                    items = []
+                    # Regex to find potential JSON objects that look like our news items
+                    # We look for something that has "category" and "primary_entity" keys
+                    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
+                    matches = re.finditer(pattern, text, re.DOTALL)
+                    
+                    for match in matches:
+                        try:
+                            obj_str = match.group(0).strip()
+                            # Ensure it's balanced if truncated
+                            if obj_str.count('{') > obj_str.count('}'):
+                                obj_str += '}'
+                            
+                            obj = json.loads(obj_str, strict=False)
+                            if isinstance(obj, dict) and "category" in obj:
+                                items.append(obj)
+                        except:
+                            continue
+                    return items
+
                 def extract_chunk_worker(chunk_data):
                     """
                     Worker function to process a single chunk in a separate thread.
@@ -416,6 +442,7 @@ if submitted:
                     i, chunk, total_chunks = chunk_data
                     worker_logs = []
                     extracted_items = []
+                    last_raw_content = ""
                     
                     # 1. Build context
                     context_for_prompt = ""
@@ -443,6 +470,7 @@ if submitted:
                             
                             if res['success']:
                                 content = res['content']
+                                last_raw_content = content # For salvage fallback
                                 key_used = res.get('key_name', 'Unknown')
                                 
                                 # --- ROBUST JSON EXTRACTION ---
@@ -493,6 +521,13 @@ if submitted:
                             worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")
                             time.sleep(2)
                     
+                    # --- EMERGENCY SALVAGE FALLBACK ---
+                    if last_raw_content:
+                        salvaged = salvage_json_items(last_raw_content)
+                        if salvaged:
+                            worker_logs.append(f"🩹 [Part {i+1}] Salvaged {len(salvaged)} items from malformed response.")
+                            return (True, salvaged, worker_logs)
+
                     worker_logs.append(f"❌ [Part {i+1}] FAILED after {max_attempts} attempts.")
                     return (False, [], worker_logs)
 
