@@ -469,7 +469,12 @@ if submitted:
             
             # --- START PARALLEL EXECUTION ---
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            max_threads = min(len(chunks), 15)
+            # Dynamic Throttling: Free tier models are hit hard by project-wide quotas
+            default_max_threads = 15
+            if "free" in selected_model:
+                default_max_threads = 5 # Slow but stable for free keys
+                
+            max_threads = min(len(chunks), default_max_threads)
             st.info(f"🚀 Starting Parallel Extraction with {max_threads} worker threads...")
             
             all_extracted_items = []

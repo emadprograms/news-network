@@ -155,13 +155,13 @@ class KeyManager:
              'model_id': 'gemini-2.0-flash',
              'tier': 'free',
              'display': 'Gemini 2.0 Flash (Free)',
-             'limits': {'rpm': 10, 'tpm': 1000000, 'rpd': 1500}
+             'limits': {'rpm': 5, 'tpm': 1000000, 'rpd': 1500}
         },
         'gemini-2.0-flash-lite-free': {
              'model_id': 'gemini-2.0-flash-lite',
              'tier': 'free',
              'display': 'Gemini 2.0 Flash Lite (Free)',
-             'limits': {'rpm': 15, 'tpm': 1000000, 'rpd': 1500}
+             'limits': {'rpm': 10, 'tpm': 1000000, 'rpd': 1500}
         },
         
         # --- GEMMA FAMILY ---
