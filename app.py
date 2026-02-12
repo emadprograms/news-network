@@ -261,10 +261,12 @@ def salvage_json_items(text: str) -> list:
     return items
 
 def extract_chunk_worker(worker_data):
-    """Task worker for parallel extraction."""
-    i, chunk, total_chunks, selected_model = worker_data
+    """Task worker for parallel extraction with Recursive Adaptive Branching."""
+    i_display, chunk, total_chunks, selected_model, depth = worker_data
     worker_logs = []
     last_raw_content = ""
+    
+    # --- PHASE 1: PREPARE PROMPT ---
     headline_inventory = ""
     context_for_prompt = ""
     for idx, item in enumerate(chunk, 1):
@@ -274,45 +276,85 @@ def extract_chunk_worker(worker_data):
         headline_inventory += f"- {title}\n"
         context_for_prompt += f"--- SOURCE {idx} ---\nTITLE: {title}\nTIME: {t}\nCONTENT: {body}\n\n"
     
-    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt, headline_inventory)
+    # Adjust display index for sub-parts if we are deep in recursion
+    display_name = f"Part {i_display}" if depth == 0 else f"Branch {i_display}"
+    
+    p = build_chunk_prompt(chunk, i_display, total_chunks, context_for_prompt, headline_inventory)
+    
+    # --- PHASE 2: TRIAL LOOP ---
     attempt, max_attempts = 0, 5
     while attempt < max_attempts:
         attempt += 1
+        
+        # --- ADAPTIVE BRANCHING TRIGGER ---
+        # If we failed 2 times and still have multiple items, branch out
+        if attempt > 2 and len(chunk) > 1:
+            worker_logs.append(f"⚠️ [{display_name}] Complexity detected. Branching into 2 sub-parts for fidelity...")
+            mid = len(chunk) // 2
+            left_chunk = chunk[:mid]
+            right_chunk = chunk[mid:]
+            
+            # Recursive calls for sub-parts
+            res_l = extract_chunk_worker((f"{i_display}.A", left_chunk, total_chunks, selected_model, depth + 1))
+            res_r = extract_chunk_worker((f"{i_display}.B", right_chunk, total_chunks, selected_model, depth + 1))
+            
+            success_l, items_l, logs_l = res_l
+            success_r, items_r, logs_r = res_r
+            
+            worker_logs.extend(logs_l)
+            worker_logs.extend(logs_r)
+            
+            combined_items = items_l + items_r
+            total_success = success_l and success_r
+            
+            if total_success:
+                worker_logs.append(f"🌿 [{display_name}] Branch Sync Complete. {len(combined_items)} items recovered.")
+                return (True, combined_items, worker_logs)
+            else:
+                # Even the branch failed? Keep trying or bubble up failure
+                worker_logs.append(f"❌ [{display_name}] Branch failure persisted.")
+                return (False, combined_items, worker_logs)
+
         try:
             token_est = km.estimate_tokens(p) if km else "N/A"
-            worker_logs.append(f"🔹 [Part {i+1}/{total_chunks}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
+            worker_logs.append(f"🔹 [{display_name}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
             res = ai_client.generate_content(p, config_id=selected_model)
+            
             if res['success']:
                 content = res['content']
                 last_raw_content = content 
                 raw_json = content.strip()
+                
+                # Cleanup markdown
                 if "```json" in raw_json:
                     match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
                     if match: raw_json = match.group(1).strip()
                 elif "```" in raw_json:
                      match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
                      if match: raw_json = match.group(1).strip()
+                
                 if not raw_json.startswith("{"):
                     match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
                     if match: raw_json = match.group(1).strip()
                 
+                # Robust repair
                 raw_json = repair_json_content(raw_json)
                 if raw_json.strip().endswith("}") is False:
                      if not raw_json.strip().endswith(('"', ',', '}', ']')): raw_json += '"'
                      if raw_json.count('{') > raw_json.count('}'): raw_json += '}]}'
-                
+
                 try:
                     data = json.loads(raw_json, strict=False)
                     items = data if isinstance(data, list) else data.get("news_items", [])
                     
-                    # --- YIELD ENFORCEMENT ---
+                    # --- YIELD ENFORCEMENT (80%) ---
                     min_yield = len(chunk) * 0.8
                     if len(items) < min_yield and attempt < max_attempts:
-                        worker_logs.append(f"⚠️ [Part {i+1}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying for better fidelity...")
+                        worker_logs.append(f"⚠️ [{display_name}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying...")
                         time.sleep(1)
-                        continue # Force retry
+                        continue 
                         
-                    worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
+                    worker_logs.append(f"✅ [{display_name}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
                     return (True, items, worker_logs)
                     
                 except Exception as json_err:
@@ -323,11 +365,11 @@ def extract_chunk_worker(worker_data):
                             # --- YIELD ENFORCEMENT (SALVAGE) ---
                             min_yield = len(chunk) * 0.8
                             if len(salvaged) < min_yield and attempt < max_attempts:
-                                worker_logs.append(f"⚠️ [Part {i+1}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
+                                worker_logs.append(f"⚠️ [{display_name}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
                                 time.sleep(1)
-                                continue # Force retry
+                                continue 
                                 
-                            worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items.")
+                            worker_logs.append(f"⚡ [{display_name}] Eager Salvage: Recovered {len(salvaged)} items.")
                             worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
                             worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                             return (True, salvaged, worker_logs)
@@ -336,28 +378,28 @@ def extract_chunk_worker(worker_data):
                 err_msg = res['content']
                 wait_sec = res.get('wait_seconds', 0)
                 if wait_sec > 0:
-                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit (Key: {res.get('key_name', 'Unknown')}). Rotating keys...")
+                    worker_logs.append(f"⏳ [{display_name}] Quota hit (Key: {res.get('key_name', 'Unknown')}). Rotating keys...")
                     time.sleep(1) 
                     continue
                 else:
-                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg} (Key: {res.get('key_name', 'Unknown')})")
+                    worker_logs.append(f"❌ [{display_name}] Trial {attempt} failed: {err_msg} (Key: {res.get('key_name', 'Unknown')})")
                     time.sleep(2)
         except Exception as e:
-            worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")
+            worker_logs.append(f"⚠️ [{display_name}] Error: {e}")
             time.sleep(2)
             
+    # --- PHASE 3: FINAL EMERGENCY SALVAGE ---
     if last_raw_content:
         salvaged = salvage_json_items(last_raw_content)
         if salvaged:
-            # --- FINAL YIELD CHECK ---
             min_yield = len(chunk) * 0.8
             if len(salvaged) >= min_yield:
-                worker_logs.append(f"🩹 [Part {i+1}] Emergency Salvage: {len(salvaged)} items.")
+                worker_logs.append(f"🩹 [{display_name}] Emergency Salvage: {len(salvaged)} items.")
                 worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
                 worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                 return (True, salvaged, worker_logs)
             else:
-                worker_logs.append(f"❌ [Part {i+1}] Emergency Salvage FAILED: Yield too low ({len(salvaged)}/{len(chunk)}). Data integrity prioritized.")
+                worker_logs.append(f"❌ [{display_name}] Emergency Salvage FAILED: Yield too low ({len(salvaged)}/{len(chunk)}).")
             
     return (False, [], worker_logs)
 
@@ -475,7 +517,7 @@ if submitted:
             
             with ThreadPoolExecutor(max_workers=max_threads) as executor:
                 future_to_chunk = {
-                    executor.submit(extract_chunk_worker, (i, chunk, len(chunks), selected_model)): i 
+                    executor.submit(extract_chunk_worker, (i+1, chunk, len(chunks), selected_model, 0)): i 
                     for i, chunk in enumerate(chunks)
                 }
                 
