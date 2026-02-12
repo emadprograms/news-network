@@ -410,28 +410,49 @@ if submitted:
 
                 def salvage_json_items(text: str) -> list:
                     """
-                    EMERGENCY FALLBACK: Hunts for individual valid JSON objects in malformed text.
-                    Look for blocks starting with {"category": and ending with }
+                    EMERGENCY FALLBACK: Hunts for individual valid JSON objects.
+                    ZERO-DISCARD UPGRADE: Also patches and recovers trailing fragments.
                     """
                     if not text: return []
                     items = []
-                    # Regex to find potential JSON objects that look like our news items
-                    # We look for something that has "category" and "primary_entity" keys
-                    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
-                    matches = re.finditer(pattern, text, re.DOTALL)
+                    last_end = 0
                     
-                    for match in matches:
+                    # 1. Recover all complete items
+                    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
+                    for match in re.finditer(pattern, text, re.DOTALL):
                         try:
                             obj_str = match.group(0).strip()
-                            # Ensure it's balanced if truncated
-                            if obj_str.count('{') > obj_str.count('}'):
-                                obj_str += '}'
-                            
+                            # Balance braces
+                            if obj_str.count('{') > obj_str.count('}'): obj_str += '}'
                             obj = json.loads(obj_str, strict=False)
                             if isinstance(obj, dict) and "category" in obj:
                                 items.append(obj)
-                        except:
-                            continue
+                                last_end = match.end()
+                        except: continue
+
+                    # 2. Recover trailing fragment (The "Zero-Discard" Patch)
+                    remaining = text[last_end:].strip()
+                    if '{"category":' in remaining:
+                        frag_start = remaining.find('{"category":')
+                        fragment = remaining[frag_start:].strip()
+                        
+                        # Try to patch with multiple levels of closing
+                        # We append multiple variants to try and 'force-close' the broken block
+                        patch_variants = ['"}', '}', '"]}', ']}', '"]}}', ']}}', '"} } ] } }']
+                        for pv in patch_variants:
+                            try:
+                                patched = fragment + pv
+                                # Extra safety: check if we need to close the outer object/list wrappers
+                                if patched.count('{') > patched.count('}'): patched += '}' * (patched.count('{') - patched.count('}'))
+                                
+                                obj = json.loads(patched, strict=False)
+                                if isinstance(obj, dict) and "category" in obj:
+                                    obj["is_truncated"] = True
+                                    obj["event_summary"] = obj.get("event_summary", "") + " [RECOVERED FRAGMENT]"
+                                    items.append(obj)
+                                    break # Found a working patch
+                            except: continue
+                            
                     return items
 
                 def extract_chunk_worker(chunk_data):
