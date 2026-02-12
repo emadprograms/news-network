@@ -407,7 +407,7 @@ if submitted:
         # --- INSTANT PREVIEW (REQUESTED) ---
         items = st.session_state['news_data']
         st.success(f"📦 Data Fetch Complete: {len(items)} news items found.")
-        with st.expander("📋 Emergency Copiable Raw Data Backup", expanded=True):
+        with st.expander("📋 Emergency Copiable Raw Data Backup", expanded=False):
             preview_text = f"TOTAL NEWS QUANTITY: {len(items)}\n"
             preview_text += "=== START RAW DATA DUMP ===\n\n"
             
