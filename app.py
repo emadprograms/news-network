@@ -320,11 +320,11 @@ def extract_chunk_worker(worker_data):
                 err_msg = res['content']
                 wait_sec = res.get('wait_seconds', 0)
                 if wait_sec > 0:
-                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit. Rotating keys...")
+                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit (Key: {res.get('key_name', 'Unknown')}). Rotating keys...")
                     time.sleep(1) 
                     continue
                 else:
-                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg}")
+                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg} (Key: {res.get('key_name', 'Unknown')})")
                     time.sleep(2)
         except Exception as e:
             worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")

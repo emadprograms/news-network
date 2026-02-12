@@ -136,9 +136,14 @@ class GeminiClient:
                 }
             else:
                  # Other errors (400, 500)
+                 err_text = response.text
+                 if "expired" in err_text.lower() or "invalid" in err_text.lower():
+                     self.key_manager.report_fatal_error(key_value)
+                     err_text = f"FATAL KEY ERROR: {err_text}"
+                     
                  return {
                     "success": False,
-                    "content": f"API Error {response.status_code}: {response.text}",
+                    "content": f"API Error {response.status_code}: {err_text}",
                     "model_used": model_id,
                     "key_name": key_name
                 }
