@@ -518,12 +518,13 @@ if submitted:
                 
                 optimized_text = optimize_json_for_synthesis(all_extracted_items)
                 
-                raw_json_str = json.dumps(all_extracted_items)
-                raw_tokens = km.estimate_tokens(raw_json_str) if km else 0
+                # --- NEW: TOKEN SAVINGS VS RAW INPUT ---
+                # Calculate total raw tokens from the actual news text being processed
+                raw_input_tokens = km.estimate_tokens(preview_text) if km else 0
                 opt_tokens = km.estimate_tokens(optimized_text) if km else 0
-                savings_pct = ((raw_tokens - opt_tokens) / raw_tokens * 100) if raw_tokens > 0 else 0
+                savings_pct = ((raw_input_tokens - opt_tokens) / raw_input_tokens * 100) if raw_input_tokens > 0 else 0
                 
-                st.info(f"💾 **Token Savings**: Output reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
+                st.info(f"💾 **Data Distillation**: Input reduced from ~{raw_input_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
                 st.code(optimized_text, language="text")
                 st.success("✅ Process Complete. Copy the optimized text above for your manual AI analysis.")
 
