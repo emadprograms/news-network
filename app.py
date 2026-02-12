@@ -200,7 +200,8 @@ You must output a valid JSON object containing a list of items. Use the followin
       "guidance_or_forecast": "String (Only if explicitly stated in text)",
       "quotes": ["Array of Strings (Direct quotes from key figures)"],
       "sentiment_indicated": ["Array of Strings (e.g., 'Analyst upgraded to Buy', 'Weak Outlook')"],
-      "is_truncated": Boolean
+      "is_truncated": Boolean,
+      "source_headlines": ["Array of Strings (MANDATORY: List every original headline from the input text that contributed to this specific extraction)"]
     }}
   ]
 }}
@@ -208,7 +209,8 @@ You must output a valid JSON object containing a list of items. Use the followin
 *** INSTRUCTIONS ***
 1. Process the provided partial dataset.
 2. Extract every distinct news event into the JSON format defined above.
-3. If no hard data exists for a field, leave it null or empty.
+3. DATA INTEGRITY: For every item, populate 'source_headlines' with the EXACT titles provided in the input text. If one item summarizes 3 headlines, list all 3.
+4. If no hard data exists for a field, leave it null or empty.
 4. Do not output any conversational text before or after the JSON block. Start with '{{' and end with '}}'.
 
 === MARKET DATA STARTS BELOW ===
@@ -518,7 +520,36 @@ if submitted:
                 
                 optimized_text = optimize_json_for_synthesis(all_extracted_items)
                 
-                # --- NEW: TOKEN SAVINGS VS RAW INPUT ---
+                # --- DATA INTEGRITY TEST ---
+                original_headlines = [item.get('title', 'Unknown') for item in st.session_state['news_data']]
+                extracted_sources = []
+                for item in all_extracted_items:
+                    sources = item.get('source_headlines', [])
+                    if isinstance(sources, list):
+                        extracted_sources.extend(sources)
+                
+                # Compare sets (fuzzy match or exact?) -> Exact for now as prompt asks for EXACT.
+                orig_set = set(original_headlines)
+                ext_set = set(extracted_sources)
+                preserved = orig_set.intersection(ext_set)
+                lost = orig_set - ext_set
+                fidelity_score = (len(preserved) / len(orig_set) * 100) if orig_set else 0
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("✅ Data Fidelity", f"{fidelity_score:.1f}%", help="Percentage of original headlines successfully processed into the output.")
+                with col2:
+                    st.metric("📑 Preservation", f"{len(preserved)}/{len(orig_set)}", help="Unique headlines covered in the final extraction.")
+                
+                if lost:
+                    with st.expander(f"⚠️ Warning: {len(lost)} Headlines skipped", expanded=False):
+                        st.write("The following headlines were either filtered by AI as duplicates, or missed during extraction:")
+                        for title in sorted(list(lost)):
+                            st.write(f"- {title}")
+                else:
+                    st.success("🎯 100% Data Integrity: All headlines accounted for.")
+
+                # --- TOKEN SAVINGS VS RAW INPUT ---
                 # Calculate total raw tokens from the actual news text being processed
                 raw_input_tokens = km.estimate_tokens(preview_text) if km else 0
                 opt_tokens = km.estimate_tokens(optimized_text) if km else 0
