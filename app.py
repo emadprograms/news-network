@@ -265,6 +265,7 @@ def extract_chunk_worker(worker_data):
     i_display, chunk, total_chunks, selected_model, depth = worker_data
     worker_logs = []
     last_raw_content = ""
+    api_call_count = 0
     
     # --- PHASE 1: PREPARE PROMPT ---
     headline_inventory = ""
@@ -298,9 +299,10 @@ def extract_chunk_worker(worker_data):
             res_l = extract_chunk_worker((f"{i_display}.A", left_chunk, total_chunks, selected_model, depth + 1))
             res_r = extract_chunk_worker((f"{i_display}.B", right_chunk, total_chunks, selected_model, depth + 1))
             
-            success_l, items_l, logs_l = res_l
-            success_r, items_r, logs_r = res_r
+            success_l, items_l, logs_l, calls_l = res_l
+            success_r, items_r, logs_r, calls_r = res_r
             
+            api_call_count += (calls_l + calls_r)
             worker_logs.extend(logs_l)
             worker_logs.extend(logs_r)
             
@@ -309,15 +311,16 @@ def extract_chunk_worker(worker_data):
             
             if total_success:
                 worker_logs.append(f"🌿 [{display_name}] Branch Sync Complete. {len(combined_items)} items recovered.")
-                return (True, combined_items, worker_logs)
+                return (True, combined_items, worker_logs, api_call_count)
             else:
                 # Even the branch failed? Keep trying or bubble up failure
                 worker_logs.append(f"❌ [{display_name}] Branch failure persisted.")
-                return (False, combined_items, worker_logs)
+                return (False, combined_items, worker_logs, api_call_count)
 
         try:
             token_est = km.estimate_tokens(p) if km else "N/A"
             worker_logs.append(f"🔹 [{display_name}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
+            api_call_count += 1
             res = ai_client.generate_content(p, config_id=selected_model)
             
             if res['success']:
@@ -355,7 +358,7 @@ def extract_chunk_worker(worker_data):
                         continue 
                         
                     worker_logs.append(f"✅ [{display_name}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
-                    return (True, items, worker_logs)
+                    return (True, items, worker_logs, api_call_count)
                     
                 except Exception as json_err:
                     err_str = str(json_err).lower()
@@ -372,7 +375,7 @@ def extract_chunk_worker(worker_data):
                             worker_logs.append(f"⚡ [{display_name}] Eager Salvage: Recovered {len(salvaged)} items.")
                             worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
                             worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
-                            return (True, salvaged, worker_logs)
+                            return (True, salvaged, worker_logs, api_call_count)
                     raise json_err
             else:
                 err_msg = res['content']
@@ -397,11 +400,11 @@ def extract_chunk_worker(worker_data):
                 worker_logs.append(f"🩹 [{display_name}] Emergency Salvage: {len(salvaged)} items.")
                 worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
                 worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
-                return (True, salvaged, worker_logs)
+                return (True, salvaged, worker_logs, api_call_count)
             else:
                 worker_logs.append(f"❌ [{display_name}] Emergency Salvage FAILED: Yield too low ({len(salvaged)}/{len(chunk)}).")
             
-    return (False, [], worker_logs)
+    return (False, [], worker_logs, api_call_count)
 
 
 # ==============================================================================
@@ -516,6 +519,7 @@ if submitted:
             
             all_extracted_items = []
             completed_count = 0
+            total_api_calls = 0
             
             with ThreadPoolExecutor(max_workers=max_threads) as executor:
                 future_to_chunk = {
@@ -525,7 +529,8 @@ if submitted:
                 
                 for future in as_completed(future_to_chunk):
                     completed_count += 1
-                    success, items, logs = future.result()
+                    success, items, logs, calls = future.result()
+                    total_api_calls += calls
                     
                     # Update UI
                     for log_msg in logs:
@@ -598,11 +603,13 @@ if submitted:
                 
                 fidelity_score = (len(preserved_titles) / len(original_headlines) * 100) if original_headlines else 0
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("✅ Data Fidelity", f"{fidelity_score:.1f}%", help="Percentage of original headlines successfully processed into the output (normalized matching).")
                 with col2:
                     st.metric("📑 Preservation", f"{len(preserved_titles)}/{len(original_headlines)}", help="Total articles captured in final distillation.")
+                with col3:
+                    st.metric("📡 Total API Calls", f"{total_api_calls}", help="Number of times the AI was queried (including retries and branches).")
                 
                 if lost_titles:
                     with st.expander(f"⚠️ Warning: {len(lost_titles)} Headlines potentially missing", expanded=False):
