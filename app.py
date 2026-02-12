@@ -577,10 +577,22 @@ if submitted:
                 
                 norm_extracted = {normalize_text(s) for s in extracted_sources}
                 
-                # Check how many normalized originals are in normalized extracted
-                found_norm = [n for n in norm_original.keys() if n in norm_extracted]
-                preserved_titles = [norm_original[n] for n in found_norm]
-                lost_titles = [title for h_norm, title in norm_original.items() if h_norm not in norm_extracted]
+                # Cross-Containment Matching (Resilient to suffix stripping/minor rephrasing)
+                preserved_titles = []
+                lost_titles = []
+                
+                for h_norm, original_title in norm_original.items():
+                    is_found = False
+                    for s_norm in norm_extracted:
+                        # Match if one is a substring of the other or exact match
+                        if h_norm == s_norm or h_norm in s_norm or s_norm in h_norm:
+                            is_found = True
+                            break
+                    
+                    if is_found:
+                        preserved_titles.append(original_title)
+                    else:
+                        lost_titles.append(original_title)
                 
                 fidelity_score = (len(preserved_titles) / len(original_headlines) * 100) if original_headlines else 0
                 
