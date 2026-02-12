@@ -275,7 +275,7 @@ def extract_chunk_worker(worker_data):
         context_for_prompt += f"[{t}] {title}\n{body}\n\n"
     
     p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt)
-    attempt, max_attempts = 0, 5
+    attempt, max_attempts = 0, 7
     while attempt < max_attempts:
         attempt += 1
         try:
@@ -309,7 +309,7 @@ def extract_chunk_worker(worker_data):
                     min_yield = len(chunk) * 0.8
                     if len(items) < min_yield and attempt < max_attempts:
                         worker_logs.append(f"⚠️ [Part {i+1}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying for better fidelity...")
-                        time.sleep(1)
+                        time.sleep(2)
                         continue # Force retry
                         
                     worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
@@ -324,7 +324,7 @@ def extract_chunk_worker(worker_data):
                             min_yield = len(chunk) * 0.8
                             if len(salvaged) < min_yield and attempt < max_attempts:
                                 worker_logs.append(f"⚠️ [Part {i+1}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
-                                time.sleep(1)
+                                time.sleep(2)
                                 continue # Force retry
                                 
                             worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items.")
@@ -336,8 +336,10 @@ def extract_chunk_worker(worker_data):
                 err_msg = res['content']
                 wait_sec = res.get('wait_seconds', 0)
                 if wait_sec > 0:
-                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit (Key: {res.get('key_name', 'Unknown')}). Rotating keys...")
-                    time.sleep(1) 
+                    # Adaptive Sleep: Actually wait for the key to be ready
+                    actual_wait = wait_sec + 2
+                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit (Key: {res.get('key_name', 'Unknown')}). Pausing for {int(actual_wait)}s...")
+                    time.sleep(actual_wait) 
                     continue
                 else:
                     worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg} (Key: {res.get('key_name', 'Unknown')})")
