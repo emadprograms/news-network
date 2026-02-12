@@ -100,6 +100,22 @@ class NewsDatabase:
         except Exception as e:
             print(f"❌ Calendar Init Error: {e}")
 
+        # 4. Create Snapshots Table
+        sql_create_snap = """
+        CREATE TABLE IF NOT EXISTS extraction_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_key TEXT UNIQUE,
+            data_json TEXT,
+            item_count INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        try:
+            self.client.execute(sql_create_snap)
+            self.client.execute("CREATE INDEX IF NOT EXISTS idx_snap_key ON extraction_snapshots(snapshot_key);")
+        except Exception as e:
+            print(f"❌ Snapshot Schema Init Error: {e}")
+
     def fetch_monitored_tickers(self):
         """
         Fetches the list of tickers from the 'stocks' table (Analyst DB).
@@ -517,3 +533,23 @@ class NewsDatabase:
         except Exception as e:
             print(f"⚠️ Failed to fetch last update time: {e}")
             return None
+
+    def save_extraction_snapshot(self, key, data_list):
+        """
+        Saves a JSON snapshot of extracted items to the DB.
+        """
+        if not self.client: return False
+        
+        sql = "INSERT INTO extraction_snapshots (snapshot_key, data_json, item_count) VALUES (?, ?, ?)"
+        try:
+            import json
+            data_str = json.dumps(data_list)
+            self.client.execute(sql, [key, data_str, len(data_list)])
+            try:
+                self.client.commit()
+            except:
+                pass
+            return True
+        except Exception as e:
+            print(f"❌ Save Snapshot Error: {e}")
+            return False

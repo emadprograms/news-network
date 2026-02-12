@@ -598,12 +598,28 @@ if submitted:
                 
                 fidelity_score = (len(preserved_titles) / len(original_headlines) * 100) if original_headlines else 0
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns([1, 1, 2])
                 with col1:
                     st.metric("✅ Data Fidelity", f"{fidelity_score:.1f}%", help="Percentage of original headlines successfully processed into the output (normalized matching).")
                 with col2:
                     st.metric("📑 Preservation", f"{len(preserved_titles)}/{len(original_headlines)}", help="Total articles captured in final distillation.")
-                
+                with col3:
+                    st.write("") # Alignment padding
+                    if st.button("💾 SAVE SNAPSHOT TO DATABASE", type="secondary", use_container_width=True):
+                        if db:
+                            # Use Bahrain Time for Snapshot Key
+                            bahrain_tz = datetime.timezone(datetime.timedelta(hours=3))
+                            now_bahrain = datetime.datetime.now(bahrain_tz)
+                            snapshot_key = now_bahrain.strftime("Snapshot %Y-%m-%d %H:%M:%S")
+                            
+                            success = db.save_extraction_snapshot(snapshot_key, all_extracted_items)
+                            if success:
+                                st.success(f"📦 Extraction state frozen as: **{snapshot_key}**")
+                            else:
+                                st.error("Failed to save snapshot to database.")
+                        else:
+                            st.error("Database connection lost.")
+
                 if lost_titles:
                     with st.expander(f"⚠️ Warning: {len(lost_titles)} Headlines potentially missing", expanded=False):
                         st.write("The following headlines were either consolidated, identified as duplicates, or missed. Check if they are actually absent from the distillation below:")
