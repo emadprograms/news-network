@@ -136,10 +136,10 @@ class GeminiClient:
                 }
             else:
                  # Other errors (400, 500)
-                 err_text = response.text.lower()
-                 if "key not valid" in err_text or "key expired" in err_text or "api key not found" in err_text:
+                 err_text = response.text
+                 if "expired" in err_text.lower() or "invalid" in err_text.lower():
                      self.key_manager.report_fatal_error(key_value)
-                     err_text = f"FATAL KEY ERROR: {response.text}"
+                     err_text = f"FATAL KEY ERROR: {err_text}"
                      
                  return {
                     "success": False,

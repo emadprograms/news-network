@@ -127,41 +127,17 @@ class KeyManager:
              'display': 'Gemini 3 Flash (Free)',
              'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000}
         },
-        'gemini-3-pro-free': {
-             'model_id': 'gemini-3-pro-preview',
-             'tier': 'free',
-             'display': 'Gemini 3 Pro (Free)',
-             'limits': {'rpm': 2, 'tpm': 32000, 'rpd': 50}
-        },
         'gemini-2.5-flash-free': {
              'model_id': 'gemini-2.5-flash',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash (Free)',
              'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000} 
         },
-        'gemini-2.5-pro-free': {
-             'model_id': 'gemini-2.5-pro',
-             'tier': 'free',
-             'display': 'Gemini 2.5 Pro (Free)',
-             'limits': {'rpm': 2, 'tpm': 32000, 'rpd': 50}
-        },
         'gemini-2.5-flash-lite-free': {
              'model_id': 'gemini-2.5-flash-lite',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash Lite (Free)',
              'limits': {'rpm': 10, 'tpm': 250000, 'rpd': 10000}
-        },
-        'gemini-2.0-flash-free': {
-             'model_id': 'gemini-2.0-flash',
-             'tier': 'free',
-             'display': 'Gemini 2.0 Flash (Free)',
-             'limits': {'rpm': 5, 'tpm': 1000000, 'rpd': 1500}
-        },
-        'gemini-2.0-flash-lite-free': {
-             'model_id': 'gemini-2.0-flash-lite',
-             'tier': 'free',
-             'display': 'Gemini 2.0 Flash Lite (Free)',
-             'limits': {'rpm': 10, 'tpm': 1000000, 'rpd': 1500}
         },
         
         # --- GEMMA FAMILY ---
@@ -376,24 +352,7 @@ class KeyManager:
             rotation.append(key_val)
             
         self.available_keys.extend(rotation)
-        if best_wait == float('inf'):
-            # --- NEW: EMPTY POOL HANDLING ---
-            # If we reach here, it means we scanned ALL available_keys and none were ready.
-            # OR available_keys was empty to begin with (all keys in cooldown or checked out).
-            
-            # 1. Check if ANY keys exist for this tier
-            matching_keys = [k for k, meta in self.key_metadata.items() if meta.get('tier') == required_tier and k not in self.dead_keys]
-            if not matching_keys:
-                 return None, None, 0.0, target_model_id # Truly no keys
-            
-            # 2. Check Cooldowns for the matching keys
-            cooldown_waits = [t - time.time() for k, t in self.cooldown_keys.items() if k in matching_keys and time.time() < t]
-            if cooldown_waits:
-                return None, None, min(cooldown_waits), target_model_id
-            
-            # 3. Busy Wait (all keys currently checked out by other threads)
-            return None, None, 5.0, target_model_id 
-
+        if best_wait == float('inf'): return None, None, 0.0, target_model_id
         return None, None, best_wait, target_model_id
 
     def _check_key_limits(self, key_val: str, model_id: str, rpm_limit: int, tpm_limit: int, rpd_limit: int, estimated_tokens: int = 0) -> float:
