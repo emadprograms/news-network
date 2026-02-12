@@ -170,7 +170,7 @@ def build_chunk_prompt(chunk, index, total, market_data_text, headline_inventory
     STRICT DATA ETL PROMPT - V2
     Includes Headline Inventory for Data Integrity Tracking.
     """
-    prompt = f"""SYSTEM NOTICE: This is PART {index+1} of {total}.
+    prompt = f"""SYSTEM NOTICE: This is PART {index} of {total}.
 
 *** ROLE ***
 You are a high-fidelity Data Extraction Engine. Your sole purpose is to convert unstructured news text into a structured, machine-readable JSON dataset.
