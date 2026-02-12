@@ -118,27 +118,40 @@ def clean_content(content_list):
     return paragraphs
 
 def chunk_data(items, max_tokens=10000): # Enforce 10k limit
-    """Splits items into chunks. Truncates individual items if they exceed limit."""
+    """
+    Splits items into chunks. 
+    Intelligent Slicing: If an individual item exceeds the limit, it is sliced 
+    into multiple parts to ensure zero data loss.
+    """
     chunks = []
     current_chunk = []
     current_tokens = 0
     
+    # Pre-process items to handle mega-stories (slicing instead of truncation)
+    flat_items = []
+    limit_chars = int(max_tokens * 2.5)
+    
     for item in items:
         body = " ".join(clean_content(item.get('content', [])))
-        meta = f"{item.get('time')} {item.get('title')} {item.get('publisher')}"
-        
-        # Hard truncate individual items to max_tokens to prevent single-item overflow
-        limit_chars = int(max_tokens * 2.5)
         if len(body) > limit_chars:
-            body = body[:limit_chars] + "... [TRUNCATED]"
-            # CRITICAL FIX: Update the item itself so the prompt uses the truncated version
-            item = item.copy()
-            item['content'] = [body]
-            
+            # Slice it
+            parts = [body[i:i+limit_chars] for i in range(0, len(body), limit_chars)]
+            for p_idx, p_text in enumerate(parts):
+                new_item = item.copy()
+                orig_title = item.get('title', 'No Title')
+                new_item['title'] = f"[Part {p_idx+1}/{len(parts)}] {orig_title}"
+                new_item['content'] = [p_text]
+                flat_items.append(new_item)
+        else:
+            flat_items.append(item)
+
+    # Now aggregate into chunks
+    for item in flat_items:
+        body = " ".join(clean_content(item.get('content', [])))
+        meta = f"{item.get('time')} {item.get('title')} {item.get('publisher')}"
         total_chars = len(body) + len(meta) + 50 
         est_tok = int(total_chars / 2.5)
         
-        # If adding this item exceeds limit, start new chunk
         if (current_tokens + est_tok) > max_tokens and current_chunk:
             chunks.append(current_chunk)
             current_chunk = []
