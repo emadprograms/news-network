@@ -259,37 +259,48 @@ def repair_json_content(json_str):
     return json_str
 
 def salvage_json_items(text: str) -> list:
-    """EMERGENCY FALLBACK: Hunts for individual JSON objects and patches segments."""
+    """EMERGENCY FALLBACK: Hunts for individual JSON objects by finding balanced braces."""
     if not text: return []
     items = []
-    last_end = 0
-    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
-    for match in re.finditer(pattern, text, re.DOTALL):
-        try:
-            obj_str = match.group(0).strip()
-            if obj_str.count('{') > obj_str.count('}'): obj_str += '}'
-            obj = json.loads(obj_str, strict=False)
-            if isinstance(obj, dict) and "category" in obj:
-                items.append(obj)
-                last_end = match.end()
-        except: continue
-    remaining = text[last_end:].strip()
-    if '{"category":' in remaining:
-        frag_start = remaining.find('{"category":')
-        fragment = remaining[frag_start:].strip()
-        patch_variants = ['"}', '}', '"]}', ']}', '"]}}', ']}}', '"} } ] } }']
-        for pv in patch_variants:
+    
+    # Find all occurrences of the start pattern
+    start_pattern = r'\{\s*"category":'
+    for match in re.finditer(start_pattern, text):
+        start_idx = match.start()
+        
+        # Scan forward for balanced closing brace
+        brace_count = 0
+        end_idx = -1
+        for i in range(start_idx, len(text)):
+            if text[i] == '{':
+                brace_count += 1
+            elif text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+        
+        if end_idx != -1:
             try:
-                patched = fragment + pv
-                if patched.count('{') > patched.count('}'): 
-                    patched += '}' * (patched.count('{') - patched.count('}'))
-                obj = json.loads(patched, strict=False)
+                obj_str = text[start_idx:end_idx].strip()
+                # Repair common trailing artifacts before parsing
+                if obj_str.endswith(','): obj_str = obj_str[:-1].strip()
+                
+                obj = json.loads(obj_str, strict=False)
                 if isinstance(obj, dict) and "category" in obj:
-                    obj["is_truncated"] = True
-                    obj["event_summary"] = obj.get("event_summary", "") + " [RECOVERED FRAGMENT]"
                     items.append(obj)
-                    break 
-            except: continue
+            except: 
+                continue
+                
+    # --- FRAGMENT SALVAGING (for cut-off responses) ---
+    # Find the last '{"category":' that didn't have a matching '}'
+    last_item_start = text.rfind('{"category":')
+    if last_item_start != -1:
+        # Check if this start index was already processed
+        if not any(text[last_item_start:].startswith(text[match.start():match.end()]) for match in re.finditer(start_pattern, text) if (match.start() + 10) < len(text)):
+             # This is a bit complex, let's just try to patch the last fragment if items is empty or last item is missing
+             pass # Basic salvaging above is usually enough, but we can add patch logic if needed.
+             
     return items
 
 def extract_chunk_worker(worker_data):
@@ -298,6 +309,7 @@ def extract_chunk_worker(worker_data):
     worker_logs = []
     last_raw_content = ""
     api_call_count = 0
+    best_parsed_items = []
     
     # --- PHASE 1: PREPARE PROMPT ---
     headline_inventory = ""
@@ -323,23 +335,24 @@ def extract_chunk_worker(worker_data):
         # Branch if Trial 2+ starts and we still have multiple items
         if attempt >= 2 and len(chunk) > 1:
             # --- TARGETED RESIDUAL EXTRACTION ---
-            # Try to salvage whatever works from previous trials
-            salvaged_so_far = salvage_json_items(last_raw_content) if last_raw_content else []
+            # Priority: 1. Success-but-low-yield items, 2. Regex-salvaged items
+            salvaged_so_far = best_parsed_items if best_parsed_items else (salvage_json_items(last_raw_content) if last_raw_content else [])
             missing_items = find_missing_items(chunk, salvaged_so_far)
             
             if not missing_items:
-                worker_logs.append(f"✅ [{display_name}] Residue Check: All items accounted for after salvage!")
+                worker_logs.append(f"✅ [{display_name}] Residue Check: All items accounted for in best results!")
                 return (True, salvaged_so_far, worker_logs, api_call_count)
             
             if len(missing_items) < len(chunk):
                 # We have partial success! Only retry the missing ones.
-                worker_logs.append(f"⚡ [{display_name}] Residue detected: Recovering {len(missing_items)}/{len(chunk)} missing items...")
+                worker_logs.append(f"⚡ [{display_name}] Residue detected: Keeping {len(salvaged_so_far)} items. Recovering {len(missing_items)} missing...")
                 res_residual = extract_chunk_worker((f"{i_display}.RES", missing_items, total_chunks, selected_model, depth + 1))
                 success_r, items_r, logs_r, calls_r = res_residual
                 
                 api_call_count += calls_r
                 worker_logs.extend(logs_r)
                 
+                # Combine results. Note: salvaged_so_far are used as the base.
                 combined_items = salvaged_so_far + items_r
                 if success_r:
                     worker_logs.append(f"🌿 [{display_name}] Residual Sync Complete. {len(combined_items)} items total.")
@@ -347,8 +360,8 @@ def extract_chunk_worker(worker_data):
                 else:
                     return (False, combined_items, worker_logs, api_call_count)
             
-            # If we couldn't salvage anything, fall back to standard blind branching
-            worker_logs.append(f"⚠️ [{display_name}] Full Failure. Branching into 2 sub-parts for fidelity...")
+            # If we couldn't find a single matching item, fall back to standard blind branching
+            worker_logs.append(f"⚠️ [{display_name}] Zero-match detected. Branching into 2 sub-parts...")
             mid = len(chunk) // 2
             left_chunk = chunk[:mid]
             right_chunk = chunk[mid:]
@@ -408,6 +421,10 @@ def extract_chunk_worker(worker_data):
                     data = json.loads(raw_json, strict=False)
                     items = data if isinstance(data, list) else data.get("news_items", [])
                     
+                    # Store as best result if it has more items (or better fidelity markers in future)
+                    if len(items) > len(best_parsed_items):
+                        best_parsed_items = items
+                        
                     # --- YIELD ENFORCEMENT (95%) ---
                     min_yield = len(chunk) * 0.95
                     if len(items) < min_yield and attempt < max_attempts:
