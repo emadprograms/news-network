@@ -117,7 +117,7 @@ def clean_content(content_list):
         paragraphs = [re.sub(r'<[^>]+>', '', c).strip() for c in content_list if c.strip()]
     return paragraphs
 
-def chunk_data(items, max_tokens=220000): # Reverted to 220k
+def chunk_data(items, max_tokens=10000): # Enforce 10k limit
     """Splits items into chunks. Truncates individual items if they exceed limit."""
     chunks = []
     current_chunk = []
@@ -128,8 +128,12 @@ def chunk_data(items, max_tokens=220000): # Reverted to 220k
         meta = f"{item.get('time')} {item.get('title')} {item.get('publisher')}"
         
         # Hard truncate individual items to max_tokens to prevent single-item overflow
-        if len(body) > (max_tokens * 2.5):
-            body = body[:int(max_tokens * 2.5)] + "... [TRUNCATED]"
+        limit_chars = int(max_tokens * 2.5)
+        if len(body) > limit_chars:
+            body = body[:limit_chars] + "... [TRUNCATED]"
+            # CRITICAL FIX: Update the item itself so the prompt uses the truncated version
+            item = item.copy()
+            item['content'] = [body]
             
         total_chars = len(body) + len(meta) + 50 
         est_tok = int(total_chars / 2.5)
@@ -507,7 +511,10 @@ if submitted:
                         progress_bar.progress(completed_count / len(chunks))
                 
                 progress_bar.progress(1.0)
+                status_text.success("Extraction Complete! Generatng Report...")
+                time.sleep(1)
                 status_text.empty()
+                progress_bar.empty()
                 
                 if all_extracted_items:
                     # 1. Save Structured JSON for the User
