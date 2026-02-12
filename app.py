@@ -495,12 +495,24 @@ if submitted:
                                      if raw_json.count('{') > raw_json.count('}'): raw_json += '}]}'
 
                                 # Parse
-                                data = json.loads(raw_json, strict=False)
-                                if isinstance(data, list): items = data
-                                else: items = data.get("news_items", [])
-                                
-                                worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {key_used})")
-                                return (True, items, worker_logs)
+                                try:
+                                    data = json.loads(raw_json, strict=False)
+                                    if isinstance(data, list): items = data
+                                    else: items = data.get("news_items", [])
+                                    
+                                    worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {key_used})")
+                                    return (True, items, worker_logs)
+                                except Exception as json_err:
+                                    err_str = str(json_err).lower()
+                                    # EAGER SALVAGE: If it's a common syntax error, don't wait 5 tries.
+                                    if any(k in err_str for k in ["delimiter", "double quotes", "expecting value", "unterminated"]):
+                                        salvaged = salvage_json_items(content)
+                                        if salvaged:
+                                            worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items from syntax error.")
+                                            return (True, salvaged, worker_logs)
+                                    
+                                    # If not eager-salvaged, raise to be caught by the retry loop
+                                    raise json_err
 
                             else:
                                 # Failure (429 or other)
