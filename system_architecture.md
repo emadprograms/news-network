@@ -31,7 +31,8 @@ graph TD
 
 ### 2. High-Yield Data Extraction
 - **Zero-Loss Slicing**: Large news items are sliced into multiple parts rather than truncated, ensuring every sentence is processed.
-- **80% Yield Enforcement**: Every extraction trial is validated. If an AI response recovers less than 80% of the input items, the result is discarded and the chunk is retried with a new key.
+- **95% Yield Enforcement**: Every extraction trial is validated. If an AI response recovers less than 95% of the input items, the result is discarded and the pipeline triggers a residual retry.
+- **Targeted Residual Extraction**: Instead of retrying an entire failed chunk, the system salvages successful items and identifies the "missing residue." Only the missing items are then sent for a retry, significantly reducing redundant API costs.
 - **Fragment Salvaging**: Uses regex-based patching to recover news items even if the AI response is cut off mid-sentence (e.g., due to max-token limits).
 
 ### 3. Intelligence Orchestration (`KeyManager` & `GeminiClient`)

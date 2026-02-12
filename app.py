@@ -96,6 +96,38 @@ else:
     ai_client = None
 
 
+def normalize_text(text):
+    """Global utility for consistent headline matching."""
+    if not text: return ""
+    # Remove non-alphanumeric, lowercase, and strip
+    return re.sub(r'[^a-zA-Z0-9]', '', str(text)).lower()
+
+def find_missing_items(chunk, salvaged_items):
+    """
+    Identifies which original news items are missing from the salvaged list.
+    Uses Cross-Containment logic (normalized substring match).
+    """
+    if not salvaged_items: return chunk
+    
+    extracted_headlines = []
+    for item in salvaged_items:
+        extracted_headlines.extend(item.get('source_headlines', []))
+    
+    norm_extracted = {normalize_text(h) for h in extracted_headlines}
+    missing_items = []
+    
+    for item in chunk:
+        h_norm = normalize_text(item.get('title', 'Unknown'))
+        is_found = False
+        for s_norm in norm_extracted:
+            if h_norm == s_norm or h_norm in s_norm or s_norm in h_norm:
+                is_found = True
+                break
+        if not is_found:
+            missing_items.append(item)
+            
+    return missing_items
+
 # --- HELPER FUNCTIONS ---
 def clean_content(content_list):
     """Cleans text list into pure paragraphs."""
@@ -290,7 +322,33 @@ def extract_chunk_worker(worker_data):
         # --- ADAPTIVE BRANCHING TRIGGER ---
         # Branch if Trial 2+ starts and we still have multiple items
         if attempt >= 2 and len(chunk) > 1:
-            worker_logs.append(f"⚠️ [{display_name}] Complexity detected. Branching into 2 sub-parts for fidelity...")
+            # --- TARGETED RESIDUAL EXTRACTION ---
+            # Try to salvage whatever works from previous trials
+            salvaged_so_far = salvage_json_items(last_raw_content) if last_raw_content else []
+            missing_items = find_missing_items(chunk, salvaged_so_far)
+            
+            if not missing_items:
+                worker_logs.append(f"✅ [{display_name}] Residue Check: All items accounted for after salvage!")
+                return (True, salvaged_so_far, worker_logs, api_call_count)
+            
+            if len(missing_items) < len(chunk):
+                # We have partial success! Only retry the missing ones.
+                worker_logs.append(f"⚡ [{display_name}] Residue detected: Recovering {len(missing_items)}/{len(chunk)} missing items...")
+                res_residual = extract_chunk_worker((f"{i_display}.RES", missing_items, total_chunks, selected_model, depth + 1))
+                success_r, items_r, logs_r, calls_r = res_residual
+                
+                api_call_count += calls_r
+                worker_logs.extend(logs_r)
+                
+                combined_items = salvaged_so_far + items_r
+                if success_r:
+                    worker_logs.append(f"🌿 [{display_name}] Residual Sync Complete. {len(combined_items)} items total.")
+                    return (True, combined_items, worker_logs, api_call_count)
+                else:
+                    return (False, combined_items, worker_logs, api_call_count)
+            
+            # If we couldn't salvage anything, fall back to standard blind branching
+            worker_logs.append(f"⚠️ [{display_name}] Full Failure. Branching into 2 sub-parts for fidelity...")
             mid = len(chunk) // 2
             left_chunk = chunk[:mid]
             right_chunk = chunk[mid:]
@@ -567,11 +625,6 @@ if submitted:
                 optimized_text = optimize_json_for_synthesis(all_extracted_items)
                 
                 # --- DATA INTEGRITY TEST ---
-                def normalize_text(text):
-                    if not text: return ""
-                    # Remove non-alphanumeric, lowercase, and strip
-                    return re.sub(r'[^a-zA-Z0-9]', '', str(text)).lower()
-
                 original_headlines = [item.get('title', 'Unknown') for item in st.session_state['news_data']]
                 norm_original = {normalize_text(h): h for h in original_headlines}
                 
