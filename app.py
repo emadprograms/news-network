@@ -306,7 +306,7 @@ def extract_chunk_worker(worker_data):
                     items = data if isinstance(data, list) else data.get("news_items", [])
                     
                     # --- YIELD ENFORCEMENT ---
-                    min_yield = len(chunk) * 0.5
+                    min_yield = len(chunk) * 0.8
                     if len(items) < min_yield and attempt < max_attempts:
                         worker_logs.append(f"⚠️ [Part {i+1}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying for better fidelity...")
                         time.sleep(1)
@@ -321,7 +321,7 @@ def extract_chunk_worker(worker_data):
                         salvaged = salvage_json_items(content)
                         if salvaged:
                             # --- YIELD ENFORCEMENT (SALVAGE) ---
-                            min_yield = len(chunk) * 0.5
+                            min_yield = len(chunk) * 0.8
                             if len(salvaged) < min_yield and attempt < max_attempts:
                                 worker_logs.append(f"⚠️ [Part {i+1}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
                                 time.sleep(1)
@@ -350,7 +350,7 @@ def extract_chunk_worker(worker_data):
         salvaged = salvage_json_items(last_raw_content)
         if salvaged:
             # --- FINAL YIELD CHECK ---
-            min_yield = len(chunk) * 0.5
+            min_yield = len(chunk) * 0.8
             if len(salvaged) >= min_yield:
                 worker_logs.append(f"🩹 [Part {i+1}] Emergency Salvage: {len(salvaged)} items.")
                 worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
