@@ -165,53 +165,49 @@ def chunk_data(items, max_tokens=10000): # Enforce 10k limit
         
     return chunks
 
-def build_chunk_prompt(chunk, index, total, market_data_text):
+def build_chunk_prompt(chunk, index, total, market_data_text, headline_inventory):
     """
-    STRICT DATA ETL PROMPT - V1
-    Forces JSON output for machine-readable datasets.
+    STRICT DATA ETL PROMPT - V2
+    Includes Headline Inventory for Data Integrity Tracking.
     """
     prompt = f"""SYSTEM NOTICE: This is PART {index+1} of {total}.
 
 *** ROLE ***
-You are a high-fidelity Data Extraction Engine. Your sole purpose is to convert unstructured news text into a structured, machine-readable JSON dataset. You have ZERO creative license. You must not analyze, correlate, or summarize beyond the explicit facts provided in the text.
+You are a high-fidelity Data Extraction Engine. Your sole purpose is to convert unstructured news text into a structured, machine-readable JSON dataset.
+
+*** DATA INTEGRITY INVENTORY ***
+The following headlines are present in this chunk. Every single headline must be accounted for in your output:
+{headline_inventory}
 
 *** STRICT CONSTRAINTS ***
-1. NO CORRELATION: Do not link separate stories unless the text explicitly links them.
-2. NO EXTERNAL KNOWLEDGE: Extract only what is in the provided text.
-3. NO SYNTHESIS: Do not merge distinct events into a general narrative. Keep them as discrete data objects.
-4. DEDUPLICATION: If a story appears multiple times (e.g., across different news wires), extract data only from the most detailed version and ignore the rest.
-5. RAW DATA PRIORITY: Prioritize preserving specific numbers (tickers, prices, % changes, revenue, EPS, deal sizes). Do not round these numbers.
-6. TRUNCATION HANDLING: If the text chunk ends in the middle of a story, extract what is visible and mark the entry as "TRUNCATED" so the next system knows to look for the rest.
+1. SOURCE TRACKING: For every item you extract, you MUST populate the 'source_headlines' field with the original headlines from the inventory above that were used to build that item.
+2. NO DATA LOSS: Every headline in the inventory must contribute to at least one 'source_headlines' entry in your JSON list.
+3. LOGICAL GROUPING: Use your intelligence to group headlines that describe the same event into ONE 'news_item', but list ALL contributing headlines in 'source_headlines'.
+4. DEDUPLICATION: If a story is a duplicate, still list its headline in the 'source_headlines' of the primary record you create.
+5. NO SYNTHESIS: Focus on facts. Extract numbers, tickers, and entities exactly.
 
 *** OUTPUT FORMAT ***
-You must output a valid JSON object containing a list of items. Use the following schema structure:
-
+Output a valid JSON object with the following schema:
 {{
   "news_items": [
     {{
-      "category": "String (Choose one: EARNINGS, MERGERS_ACQUISITIONS, MACRO_ECONOMY, MARKET_MOVEMENTS, GEOPOLITICS, EXECUTIVE_MOVES, OTHER)",
-      "primary_entity": "String (Company Name or Ticker or Country)",
-      "secondary_entities": ["Array of Strings (Other involved parties)"],
-      "event_summary": "String (Concise, factual, one-sentence description of the event)",
-      "hard_data": {{
-        "key_metric_1": "value",  // e.g., "Revenue": "$12.4B"
-        "key_metric_2": "value"   // e.g., "EPS": "$1.20"
-      }},
-      "guidance_or_forecast": "String (Only if explicitly stated in text)",
-      "quotes": ["Array of Strings (Direct quotes from key figures)"],
-      "sentiment_indicated": ["Array of Strings (e.g., 'Analyst upgraded to Buy', 'Weak Outlook')"],
+      "category": "String (EARNINGS, MERGERS_ACQUISITIONS, MACRO_ECONOMY, MARKET_MOVEMENTS, GEOPOLITICS, EXECUTIVE_MOVES, OTHER)",
+      "primary_entity": "String (Company/Ticker/Country)",
+      "secondary_entities": ["Array of Strings"],
+      "event_summary": "String (Fact-based summary)",
+      "hard_data": {{ "key": "value" }},
+      "quotes": ["Array of Strings"],
+      "sentiment_indicated": ["Array of Strings"],
       "is_truncated": Boolean,
-      "source_headlines": ["Array of Strings (MANDATORY: List every original headline from the input text that contributed to this specific extraction)"]
+      "source_headlines": ["Array of MANDATORY EXACT HEADLINES from the inventory above"]
     }}
   ]
 }}
 
 *** INSTRUCTIONS ***
-1. Process the provided partial dataset.
-2. Extract every distinct news event into the JSON format defined above.
-3. DATA INTEGRITY: For every item, populate 'source_headlines' with the EXACT titles provided in the input text. If one item summarizes 3 headlines, list all 3.
-4. If no hard data exists for a field, leave it null or empty.
-4. Do not output any conversational text before or after the JSON block. Start with '{{' and end with '}}'.
+1. Start with '{{' and end with '}}'. No conversational text.
+2. Use the Headline Inventory as your checklist.
+3. If no data exists for a field, leave it null.
 
 === MARKET DATA STARTS BELOW ===
 {market_data_text}
@@ -269,14 +265,16 @@ def extract_chunk_worker(worker_data):
     i, chunk, total_chunks, selected_model = worker_data
     worker_logs = []
     last_raw_content = ""
+    headline_inventory = ""
     context_for_prompt = ""
-    for item in chunk:
+    for idx, item in enumerate(chunk, 1):
         t = item.get('time', 'N/A')
         title = item.get('title', 'No Title')
         body = " ".join(clean_content(item.get('content', [])))
-        context_for_prompt += f"[{t}] {title}\n{body}\n\n"
+        headline_inventory += f"- {title}\n"
+        context_for_prompt += f"--- SOURCE {idx} ---\nTITLE: {title}\nTIME: {t}\nCONTENT: {body}\n\n"
     
-    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt)
+    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt, headline_inventory)
     attempt, max_attempts = 0, 5
     while attempt < max_attempts:
         attempt += 1
@@ -521,30 +519,39 @@ if submitted:
                 optimized_text = optimize_json_for_synthesis(all_extracted_items)
                 
                 # --- DATA INTEGRITY TEST ---
+                def normalize_text(text):
+                    if not text: return ""
+                    # Remove non-alphanumeric, lowercase, and strip
+                    return re.sub(r'[^a-zA-Z0-9]', '', str(text)).lower()
+
                 original_headlines = [item.get('title', 'Unknown') for item in st.session_state['news_data']]
+                norm_original = {normalize_text(h): h for h in original_headlines}
+                
                 extracted_sources = []
                 for item in all_extracted_items:
                     sources = item.get('source_headlines', [])
                     if isinstance(sources, list):
                         extracted_sources.extend(sources)
                 
-                # Compare sets (fuzzy match or exact?) -> Exact for now as prompt asks for EXACT.
-                orig_set = set(original_headlines)
-                ext_set = set(extracted_sources)
-                preserved = orig_set.intersection(ext_set)
-                lost = orig_set - ext_set
-                fidelity_score = (len(preserved) / len(orig_set) * 100) if orig_set else 0
+                norm_extracted = {normalize_text(s) for s in extracted_sources}
+                
+                # Check how many normalized originals are in normalized extracted
+                found_norm = [n for n in norm_original.keys() if n in norm_extracted]
+                preserved_titles = [norm_original[n] for n in found_norm]
+                lost_titles = [title for h_norm, title in norm_original.items() if h_norm not in norm_extracted]
+                
+                fidelity_score = (len(preserved_titles) / len(original_headlines) * 100) if original_headlines else 0
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("✅ Data Fidelity", f"{fidelity_score:.1f}%", help="Percentage of original headlines successfully processed into the output.")
+                    st.metric("✅ Data Fidelity", f"{fidelity_score:.1f}%", help="Percentage of original headlines successfully processed into the output (normalized matching).")
                 with col2:
-                    st.metric("📑 Preservation", f"{len(preserved)}/{len(orig_set)}", help="Unique headlines covered in the final extraction.")
+                    st.metric("📑 Preservation", f"{len(preserved_titles)}/{len(original_headlines)}", help="Total articles captured in final distillation.")
                 
-                if lost:
-                    with st.expander(f"⚠️ Warning: {len(lost)} Headlines skipped", expanded=False):
-                        st.write("The following headlines were either filtered by AI as duplicates, or missed during extraction:")
-                        for title in sorted(list(lost)):
+                if lost_titles:
+                    with st.expander(f"⚠️ Warning: {len(lost_titles)} Headlines potentially missing", expanded=False):
+                        st.write("The following headlines were either consolidated, identified as duplicates, or missed. Check if they are actually absent from the distillation below:")
+                        for title in sorted(list(set(lost_titles))):
                             st.write(f"- {title}")
                 else:
                     st.success("🎯 100% Data Integrity: All headlines accounted for.")
