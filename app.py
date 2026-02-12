@@ -216,6 +216,130 @@ You must output a valid JSON object containing a list of items. Use the followin
 """
     return prompt
 
+def repair_json_content(json_str):
+    """Robust JSON repair for common LLM syntax errors."""
+    json_str = json_str.strip()
+    json_str = re.sub(r'\}\s*\{', '}, {', json_str)
+    json_str = re.sub(r'\]\s*\[', '], [', json_str)
+    json_str = re.sub(r',\s*\}', '}', json_str)
+    json_str = re.sub(r',\s*\]', ']', json_str)
+    json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
+    json_str = re.sub(r'(\d+|true|false|null)\s*\n\s*\"', r'\1, "', json_str)
+    json_str = re.sub(r'\"([a-zA-Z0-9_]+)\"\s+\"([^\"]+)\"', r'"\1": "\2"', json_str)
+    return json_str
+
+def salvage_json_items(text: str) -> list:
+    """EMERGENCY FALLBACK: Hunts for individual JSON objects and patches segments."""
+    if not text: return []
+    items = []
+    last_end = 0
+    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
+    for match in re.finditer(pattern, text, re.DOTALL):
+        try:
+            obj_str = match.group(0).strip()
+            if obj_str.count('{') > obj_str.count('}'): obj_str += '}'
+            obj = json.loads(obj_str, strict=False)
+            if isinstance(obj, dict) and "category" in obj:
+                items.append(obj)
+                last_end = match.end()
+        except: continue
+    remaining = text[last_end:].strip()
+    if '{"category":' in remaining:
+        frag_start = remaining.find('{"category":')
+        fragment = remaining[frag_start:].strip()
+        patch_variants = ['"}', '}', '"]}', ']}', '"]}}', ']}}', '"} } ] } }']
+        for pv in patch_variants:
+            try:
+                patched = fragment + pv
+                if patched.count('{') > patched.count('}'): 
+                    patched += '}' * (patched.count('{') - patched.count('}'))
+                obj = json.loads(patched, strict=False)
+                if isinstance(obj, dict) and "category" in obj:
+                    obj["is_truncated"] = True
+                    obj["event_summary"] = obj.get("event_summary", "") + " [RECOVERED FRAGMENT]"
+                    items.append(obj)
+                    break 
+            except: continue
+    return items
+
+def extract_chunk_worker(worker_data):
+    """Task worker for parallel extraction."""
+    i, chunk, total_chunks, selected_model = worker_data
+    worker_logs = []
+    last_raw_content = ""
+    context_for_prompt = ""
+    for item in chunk:
+        t = item.get('time', 'N/A')
+        title = item.get('title', 'No Title')
+        body = " ".join(clean_content(item.get('content', [])))
+        context_for_prompt += f"[{t}] {title}\n{body}\n\n"
+    
+    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt)
+    attempt, max_attempts = 0, 5
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            token_est = km.estimate_tokens(p) if km else "N/A"
+            worker_logs.append(f"🔹 [Part {i+1}/{total_chunks}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
+            res = ai_client.generate_content(p, config_id=selected_model)
+            if res['success']:
+                content = res['content']
+                last_raw_content = content 
+                raw_json = content.strip()
+                if "```json" in raw_json:
+                    match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
+                    if match: raw_json = match.group(1).strip()
+                elif "```" in raw_json:
+                     match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
+                     if match: raw_json = match.group(1).strip()
+                if not raw_json.startswith("{"):
+                    match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
+                    if match: raw_json = match.group(1).strip()
+                
+                raw_json = repair_json_content(raw_json)
+                if raw_json.strip().endswith("}") is False:
+                     if not raw_json.strip().endswith(('"', ',', '}', ']')): raw_json += '"'
+                     if raw_json.count('{') > raw_json.count('}'): raw_json += '}]}'
+                
+                try:
+                    data = json.loads(raw_json, strict=False)
+                    items = data if isinstance(data, list) else data.get("news_items", [])
+                    worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
+                    return (True, items, worker_logs)
+                except Exception as json_err:
+                    err_str = str(json_err).lower()
+                    if any(k in err_str for k in ["delimiter", "double quotes", "expecting value", "unterminated"]):
+                        salvaged = salvage_json_items(content)
+                        if salvaged:
+                            worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items.")
+                            worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
+                            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
+                            return (True, salvaged, worker_logs)
+                    raise json_err
+            else:
+                err_msg = res['content']
+                wait_sec = res.get('wait_seconds', 0)
+                if wait_sec > 0:
+                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit. Rotating keys...")
+                    time.sleep(1) 
+                    continue
+                else:
+                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg}")
+                    time.sleep(2)
+        except Exception as e:
+            worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")
+            time.sleep(2)
+            
+    if last_raw_content:
+        salvaged = salvage_json_items(last_raw_content)
+        if salvaged:
+            worker_logs.append(f"🩹 [Part {i+1}] Emergency Salvage: {len(salvaged)} items.")
+            worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
+            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
+            return (True, salvaged, worker_logs)
+            
+    return (False, [], worker_logs)
+
 
 # ==============================================================================
 #  LAY OUT
@@ -228,24 +352,6 @@ st.title("📰 News Network Analysis")
 with st.container():
     st.subheader("🛠️ Analyst Control Panel")
     
-    # DEBUG: Key Status
-    with st.expander("🔑 System Keys & Status"):
-        if km:
-            keys = km.get_all_managed_keys()
-            if keys:
-                clean_keys = []
-                for k in keys:
-                    clean_keys.append({
-                        "Name": k['key_name'],
-                        "Tier": k.get('tier', 'free'),
-                        "Priority": k.get('priority', 10),
-                        "Added": k.get('added_at', 'N/A')
-                    })
-                st.dataframe(clean_keys)
-            else:
-                st.warning("No keys found in Database.")
-        else:
-            st.error("KeyManager not initialized.")
 
     with st.form("analyst_controls"):
         # ROW 1: Time Window
@@ -258,40 +364,23 @@ with st.container():
         
         st.divider()
 
-        # ROW 2: Model Configuration
-        st.markdown("**2. AI Extraction Configuration**")
-        col_ai1, col_ai2 = st.columns([3, 1])
-        
-        with col_ai1:
-            st.info(
-                "💡 **Structured ETL Mode Active**: The system is forced into a high-fidelity data extraction role. "
-                "It will output a machine-readable JSON dataset containing earnings, macroEvents, and market movements."
-            )
-            
-        with col_ai2:
-            if km:
-                 model_options = list(km.MODELS_CONFIG.keys())
-                 ix = 0
-                 if 'gemini-2.0-flash-paid' in model_options:
-                     ix = model_options.index('gemini-2.0-flash-paid')
-                 elif 'gemini-1.5-flash-paid' in model_options:
-                     ix = model_options.index('gemini-1.5-flash-paid')
-                 selected_model = st.selectbox("Select Model", options=model_options, index=ix)
-            else:
-                st.error("Keys unavailable")
-                selected_model = None
+        # ROW 2: Model & Model Setup
+        st.markdown("**2. Select Extraction Model**")
+        if km:
+             model_options = list(km.MODELS_CONFIG.keys())
+             ix = 0
+             if 'gemini-2.0-flash-paid' in model_options:
+                 ix = model_options.index('gemini-2.0-flash-paid')
+             elif 'gemini-1.5-flash-paid' in model_options:
+                 ix = model_options.index('gemini-1.5-flash-paid')
+             selected_model = st.selectbox("Select Model", options=model_options, index=ix, label_visibility="collapsed")
+        else:
+            st.error("Keys unavailable")
+            selected_model = None
 
         st.divider()
         
-        # ROW 3: Execution Mode
-        col_exec, col_btn = st.columns([3, 1])
-        with col_exec:
-             mode = st.radio("Extraction Mode", ["🚀 RUN ETL (Full Extraction)", "🧪 DRY RUN (Test Prompts Only)"], horizontal=True)
-        
-        with col_btn:
-            st.write("") 
-            st.write("") 
-            submitted = st.form_submit_button("▶️ START EXTRACTION", type="primary")
+        submitted = st.form_submit_button("▶️ START EXTRACTION", type="primary", use_container_width=True)
 
 # 3. EXECUTION LOGIC
 if submitted:
@@ -299,7 +388,6 @@ if submitted:
     st.session_state['data_loaded'] = False
     st.session_state['news_data'] = []
     st.session_state['ai_report'] = ""
-    st.session_state['dry_run_prompts'] = []
     
     if db:
         with st.spinner("1/3 Fetching Market Data..."):
@@ -341,320 +429,84 @@ if submitted:
         if len(chunks) > 1:
             st.toast(f"Data too large for one prompt. Split into {len(chunks)} parts.")
         
-        # C. EXECUTE MODE
-        if "Dry Run" in mode:
-            prompts = []
-            for i, chunk in enumerate(chunks):
-                # Build context for display
-                context_for_prompt = ""
-                for item in chunk:
-                    t = item.get('time', 'N/A')
-                    title = item.get('title', 'No Title')
-                    body = " ".join(clean_content(item.get('content', [])))
-                    context_for_prompt += f"[{t}] {title}\n{body}\n\n"
-                    
-                p = build_chunk_prompt(chunk, i, len(chunks), context_for_prompt)
-                prompts.append(p)
-            st.session_state['dry_run_prompts'] = prompts
-            st.toast(f"Dry Run Complete: {len(prompts)} ETL prompts built.")
-            
+        # C. EXECUTE EXTRACTION
+        all_extracted_items = []
+        log_container = st.container()
+        progress_bar = st.progress(0.0)
+        status_text = st.empty()
+        
+        # Run AI
+        if not ai_client:
+            st.error("AI Client unavailable.")
         else:
-            # Run AI
-            if not ai_client:
-                st.error("AI Client unavailable.")
-            else:
-                import json
-                all_extracted_items = []
-                last_idx = len(chunks) - 1
+            import json
+            # --- LIVE ETL LOGS ---
+            log_expander = st.expander("🛠️ Live ETL Logs", expanded=True)
+            log_container = log_expander.container()
+            
+            # --- START PARALLEL EXECUTION ---
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            max_threads = min(len(chunks), 15)
+            st.info(f"🚀 Starting Parallel Extraction with {max_threads} worker threads...")
+            
+            all_extracted_items = []
+            completed_count = 0
+            
+            with ThreadPoolExecutor(max_workers=max_threads) as executor:
+                future_to_chunk = {
+                    executor.submit(extract_chunk_worker, (i, chunk, len(chunks), selected_model)): i 
+                    for i, chunk in enumerate(chunks)
+                }
                 
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # --- LIVE ETL LOGS ---
-                log_expander = st.expander("🛠️ Live ETL Logs", expanded=True)
-                log_container = log_expander.container()
-                
-                def repair_json_content(json_str):
-                    """
-                    Robust JSON repair for common LLM syntax errors.
-                    """
-                    # 0. Strip leading/trailing non-json junk that might have slipped through
-                    json_str = json_str.strip()
+                for future in as_completed(future_to_chunk):
+                    completed_count += 1
+                    success, items, logs = future.result()
                     
-                    # 1. Fix missing commas between objects: } { -> }, {
-                    json_str = re.sub(r'\}\s*\{', '}, {', json_str)
-                    
-                    # 2. Fix missing commas between array items: ] [ -> ], [
-                    json_str = re.sub(r'\]\s*\[', '], [', json_str)
-                    
-                    # 3. Fix Trailing Commas: , } -> } and , ] -> ]
-                    # This is the most likely cause of "Expecting property name" errors
-                    json_str = re.sub(r',\s*\}', '}', json_str)
-                    json_str = re.sub(r',\s*\]', ']', json_str)
-
-                    # 4. Fix missing commas between key-value pairs
-                    # Pattern: "val" "key": -> "val", "key":
-                    json_str = re.sub(r'\"\s*\n\s*\"', '", "', json_str)
-                    
-                    # 5. Fix missing commas after literals (numbers, true, false, null)
-                    json_str = re.sub(r'(\d+|true|false|null)\s*\n\s*\"', r'\1, "', json_str)
-                    
-                    # 6. Fix Missing Colons (The "Expecting :" error)
-                    # Pattern: "key" "value" -> "key": "value"
-                    json_str = re.sub(r'\"([a-zA-Z0-9_]+)\"\s+\"([^\"]+)\"', r'"\1": "\2"', json_str)
-                    
-                    return json_str
-
-                # --- PARALLEL EXECUTION LOGIC ---
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                def salvage_json_items(text: str) -> list:
-                    """
-                    EMERGENCY FALLBACK: Hunts for individual valid JSON objects.
-                    ZERO-DISCARD UPGRADE: Also patches and recovers trailing fragments.
-                    """
-                    if not text: return []
-                    items = []
-                    last_end = 0
-                    
-                    # 1. Recover all complete items
-                    pattern = r'\{\s*"category":.*?\}(?=\s*[,\]\}]|\s*$)'
-                    for match in re.finditer(pattern, text, re.DOTALL):
-                        try:
-                            obj_str = match.group(0).strip()
-                            # Balance braces
-                            if obj_str.count('{') > obj_str.count('}'): obj_str += '}'
-                            obj = json.loads(obj_str, strict=False)
-                            if isinstance(obj, dict) and "category" in obj:
-                                items.append(obj)
-                                last_end = match.end()
-                        except: continue
-
-                    # 2. Recover trailing fragment (The "Zero-Discard" Patch)
-                    remaining = text[last_end:].strip()
-                    if '{"category":' in remaining:
-                        frag_start = remaining.find('{"category":')
-                        fragment = remaining[frag_start:].strip()
+                    # Update UI
+                    for log_msg in logs:
+                        if "✅" in log_msg: log_container.success(log_msg)
+                        elif "❌" in log_msg: log_container.error(log_msg)
+                        elif "⏳" in log_msg: log_container.warning(log_msg)
+                        elif log_msg.startswith("DEBUG_RAW_CONTENT|"):
+                            with log_container.expander("🔍 View Salvaged Raw Response"):
+                                st.code(log_msg.split("|", 1)[1])
+                        elif log_msg.startswith("DEBUG_SALVAGED_ITEMS|"):
+                            with log_container.expander("📝 View Extracted Salvaged Items"):
+                                st.code(log_msg.split("|", 1)[1], language="json")
+                        else: log_container.write(log_msg)
                         
-                        # Try to patch with multiple levels of closing
-                        # We append multiple variants to try and 'force-close' the broken block
-                        patch_variants = ['"}', '}', '"]}', ']}', '"]}}', ']}}', '"} } ] } }']
-                        for pv in patch_variants:
-                            try:
-                                patched = fragment + pv
-                                # Extra safety: check if we need to close the outer object/list wrappers
-                                if patched.count('{') > patched.count('}'): patched += '}' * (patched.count('{') - patched.count('}'))
-                                
-                                obj = json.loads(patched, strict=False)
-                                if isinstance(obj, dict) and "category" in obj:
-                                    obj["is_truncated"] = True
-                                    obj["event_summary"] = obj.get("event_summary", "") + " [RECOVERED FRAGMENT]"
-                                    items.append(obj)
-                                    break # Found a working patch
-                            except: continue
-                            
-                    return items
-
-                def extract_chunk_worker(chunk_data):
-                    """
-                    Worker function to process a single chunk in a separate thread.
-                    Returns: (success, items, log_messages)
-                    """
-                    i, chunk, total_chunks = chunk_data
-                    worker_logs = []
-                    extracted_items = []
-                    last_raw_content = ""
+                    if success:
+                        all_extracted_items.extend(items)
                     
-                    # 1. Build context
-                    context_for_prompt = ""
-                    for item in chunk:
-                        t = item.get('time', 'N/A')
-                        title = item.get('title', 'No Title')
-                        body = " ".join(clean_content(item.get('content', [])))
-                        context_for_prompt += f"[{t}] {title}\n{body}\n\n"
+                    progress_bar.progress(completed_count / len(chunks))
+            
+            progress_bar.progress(1.0)
+            status_text.success("Extraction Complete!")
+            time.sleep(1)
+            status_text.empty()
+            progress_bar.empty()
+            
+            if all_extracted_items:
+                final_dataset = {"news_items": all_extracted_items, "total_entities": len(all_extracted_items)}
+                st.session_state['ai_report'] = json.dumps(final_dataset, indent=2)
+                st.session_state['json_data'] = all_extracted_items
 
-                    p = build_chunk_prompt(chunk, i, total_chunks, context_for_prompt)
-                    
-                    # 2. Execute with Relentless Rotation & Retry
-                    attempt = 0
-                    max_attempts = 5 # Avoid infinite loops in threads
-                    
-                    while attempt < max_attempts:
-                        attempt += 1
-                        try:
-                            # Token Est
-                            token_est = km.estimate_tokens(p) if km else "N/A"
-                            worker_logs.append(f"🔹 [Part {i+1}/{total_chunks}] Trial {attempt} - Extraction in progress... (~{token_est} tokens)")
-                            
-                            # API Call
-                            res = ai_client.generate_content(p, config_id=selected_model)
-                            
-                            if res['success']:
-                                content = res['content']
-                                last_raw_content = content # For salvage fallback
-                                key_used = res.get('key_name', 'Unknown')
-                                
-                                # --- ROBUST JSON EXTRACTION ---
-                                raw_json = content.strip()
-                                # Layer 1-3 repairs (inline for compactness or call helper)
-                                if "```json" in raw_json:
-                                    match = re.search(r"```json\s*(.*?)\s*```", raw_json, re.DOTALL)
-                                    if match: raw_json = match.group(1).strip()
-                                elif "```" in raw_json:
-                                     match = re.search(r"```\s*(.*?)\s*```", raw_json, re.DOTALL)
-                                     if match: raw_json = match.group(1).strip()
-                                if not raw_json.startswith("{"):
-                                    match = re.search(r"(\{.*\})", raw_json, re.DOTALL)
-                                    if match: raw_json = match.group(1).strip()
-                                if raw_json.endswith("```"): raw_json = raw_json[:-3].strip()
-                                
-                                raw_json = repair_json_content(raw_json)
-                                
-                                # Layer 5 repair
-                                if raw_json.strip().endswith("}") is False:
-                                     if not raw_json.strip().endswith(('"', ',', '}', ']')): raw_json += '"'
-                                     if raw_json.count('{') > raw_json.count('}'): raw_json += '}]}'
-
-                                # Parse
-                                try:
-                                    data = json.loads(raw_json, strict=False)
-                                    if isinstance(data, list): items = data
-                                    else: items = data.get("news_items", [])
-                                    
-                                    worker_logs.append(f"✅ [Part {i+1}] Success! {len(items)} items. (Key: {key_used})")
-                                    return (True, items, worker_logs)
-                                except Exception as json_err:
-                                    err_str = str(json_err).lower()
-                                    # EAGER SALVAGE: If it's a common syntax error, don't wait 5 tries.
-                                    if any(k in err_str for k in ["delimiter", "double quotes", "expecting value", "unterminated"]):
-                                        salvaged = salvage_json_items(content)
-                                        if salvaged:
-                                            worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items from syntax error.")
-                                            worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
-                                            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
-                                            return (True, salvaged, worker_logs)
-                                    
-                                    # If not eager-salvaged, raise to be caught by the retry loop
-                                    raise json_err
-
-                            else:
-                                # Failure (429 or other)
-                                err_msg = res['content']
-                                failed_key = res.get('key_name', 'Unknown')
-                                wait_sec = res.get('wait_seconds', 0)
-                                
-                                if wait_sec > 0:
-                                    worker_logs.append(f"⏳ [Part {i+1}] Quota hit for '{failed_key}'. Retrying with new key...")
-                                    time.sleep(1) # Small sleep, then rotate
-                                    continue
-                                else:
-                                    worker_logs.append(f"❌ [Part {i+1}] Trial {attempt} failed: {err_msg}")
-                                    time.sleep(2)
-                                    continue
-                                    
-                        except Exception as e:
-                            worker_logs.append(f"⚠️ [Part {i+1}] Error: {e}")
-                            time.sleep(2)
-                    
-                    # --- EMERGENCY SALVAGE FALLBACK ---
-                    if last_raw_content:
-                        salvaged = salvage_json_items(last_raw_content)
-                        if salvaged:
-                            worker_logs.append(f"🩹 [Part {i+1}] Salvaged {len(salvaged)} items from malformed response.")
-                            worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
-                            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
-                            return (True, salvaged, worker_logs)
-
-                    worker_logs.append(f"❌ [Part {i+1}] FAILED after {max_attempts} attempts.")
-                    return (False, [], worker_logs)
-
-                # --- START PARALLEL EXECUTION ---
-                max_threads = min(len(chunks), 15) # Cap at 15 threads or num chunks
-                st.info(f"🚀 Starting Parallel Extraction with {max_threads} worker threads...")
+                st.balloons()
+                st.divider()
+                st.subheader("✨ Optimized Token-Light Input")
                 
-                completed_count = 0
+                optimized_text = optimize_json_for_synthesis(all_extracted_items)
                 
-                with ThreadPoolExecutor(max_workers=max_threads) as executor:
-                    # Submit all tasks
-                    future_to_chunk = {executor.submit(extract_chunk_worker, (i, chunk, len(chunks))): i for i, chunk in enumerate(chunks)}
-                    
-                    for future in as_completed(future_to_chunk):
-                        completed_count += 1
-                        success, items, logs = future.result()
-                        
-                        # Update UI
-                        for log_msg in logs:
-                            if "✅" in log_msg: log_container.success(log_msg)
-                            elif "❌" in log_msg: log_container.error(log_msg)
-                            elif "⏳" in log_msg: log_container.warning(log_msg)
-                            elif log_msg.startswith("DEBUG_RAW_CONTENT|"):
-                                with log_container.expander("🔍 View Salvaged Raw Response"):
-                                    st.code(log_msg.split("|", 1)[1])
-                            elif log_msg.startswith("DEBUG_SALVAGED_ITEMS|"):
-                                with log_container.expander("📝 View Extracted Salvaged Items"):
-                                    st.code(log_msg.split("|", 1)[1], language="json")
-                            else: log_container.write(log_msg)
-                            
-                        if success:
-                            all_extracted_items.extend(items)
-                        
-                        # Update Progress
-                        progress_bar.progress(completed_count / len(chunks))
+                raw_json_str = json.dumps(all_extracted_items)
+                raw_tokens = km.estimate_tokens(raw_json_str) if km else 0
+                opt_tokens = km.estimate_tokens(optimized_text) if km else 0
+                savings_pct = ((raw_tokens - opt_tokens) / raw_tokens * 100) if raw_tokens > 0 else 0
                 
-                progress_bar.progress(1.0)
-                status_text.success("Extraction Complete! Generatng Report...")
-                time.sleep(1)
-                status_text.empty()
-                progress_bar.empty()
-                
-                if all_extracted_items:
-                    # Set ai_report for download button, even if not displayed
-                    final_dataset = {"news_items": all_extracted_items, "total_entities": len(all_extracted_items)}
-                    st.session_state['ai_report'] = json.dumps(final_dataset, indent=2)
-                    st.session_state['json_data'] = all_extracted_items # Ensure this is set for optimization
-
-                    st.balloons()
-                    st.divider()
-                    st.subheader("✨ Optimized Token-Light Input")
-                    
-                    # OPTIMIZATION: Transform JSON to Dense Text
-                    optimized_text = optimize_json_for_synthesis(all_extracted_items)
-                    
-                    # TOKEN SAVINGS CALCULATION
-                    raw_json_str = json.dumps(all_extracted_items)
-                    raw_tokens = km.estimate_tokens(raw_json_str) if km else 0
-                    opt_tokens = km.estimate_tokens(optimized_text) if km else 0
-                    savings = raw_tokens - opt_tokens
-                    savings_pct = (savings / raw_tokens * 100) if raw_tokens > 0 else 0
-                    
-                    st.info(f"💾 **Token Savings**: Output reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
-                    st.code(optimized_text, language="text")
-                    
-                    st.success("✅ Process Complete. Copy the optimized text above for your manual AI analysis.")
+                st.info(f"💾 **Token Savings**: Output reduced from ~{raw_tokens:,} to ~{opt_tokens:,} tokens (**-{savings_pct:.1f}%**)")
+                st.code(optimized_text, language="text")
+                st.success("✅ Process Complete. Copy the optimized text above for your manual AI analysis.")
 
 if st.session_state['data_loaded']:
     st.divider()
     
-    # Market Data Preview & Download
-    items = st.session_state['news_data']
-    with st.expander(f"📊 Raw Market Data Backup ({len(items)} items found)"):
-        st.json(items)
-        if st.session_state.get('ai_report'):
-            st.download_button(
-                "📥 Download Extraction JSON", 
-                st.session_state['ai_report'], 
-                file_name="extracted_news_data.json",
-                mime="application/json"
-            )
-        
-    # Dry Run Results
-    if st.session_state['dry_run_prompts']:
-        st.subheader(f"🧪 Dry Run Result ({len(st.session_state['dry_run_prompts'])} Parts)")
-        tabs = st.tabs([f"Part {i+1}" for i in range(len(st.session_state['dry_run_prompts']))])
-        
-        for i, tab in enumerate(tabs):
-            prompt = st.session_state['dry_run_prompts'][i]
-            with tab:
-                st.info(f"Part {i+1} ETL Prompt - This would be sent for extraction.")
-                st.caption(f"Estimated Tokens: {km.estimate_tokens(prompt) if km else 'N/A'}")
-                st.code(prompt, language="text")
+    pass
