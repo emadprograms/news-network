@@ -509,6 +509,8 @@ if submitted:
                                         salvaged = salvage_json_items(content)
                                         if salvaged:
                                             worker_logs.append(f"⚡ [Part {i+1}] Eager Salvage: Recovered {len(salvaged)} items from syntax error.")
+                                            worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
+                                            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                                             return (True, salvaged, worker_logs)
                                     
                                     # If not eager-salvaged, raise to be caught by the retry loop
@@ -538,6 +540,8 @@ if submitted:
                         salvaged = salvage_json_items(last_raw_content)
                         if salvaged:
                             worker_logs.append(f"🩹 [Part {i+1}] Salvaged {len(salvaged)} items from malformed response.")
+                            worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
+                            worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                             return (True, salvaged, worker_logs)
 
                     worker_logs.append(f"❌ [Part {i+1}] FAILED after {max_attempts} attempts.")
@@ -562,6 +566,12 @@ if submitted:
                             if "✅" in log_msg: log_container.success(log_msg)
                             elif "❌" in log_msg: log_container.error(log_msg)
                             elif "⏳" in log_msg: log_container.warning(log_msg)
+                            elif log_msg.startswith("DEBUG_RAW_CONTENT|"):
+                                with log_container.expander("🔍 View Salvaged Raw Response"):
+                                    st.code(log_msg.split("|", 1)[1])
+                            elif log_msg.startswith("DEBUG_SALVAGED_ITEMS|"):
+                                with log_container.expander("📝 View Extracted Salvaged Items"):
+                                    st.code(log_msg.split("|", 1)[1], language="json")
                             else: log_container.write(log_msg)
                             
                         if success:
