@@ -287,8 +287,8 @@ def extract_chunk_worker(worker_data):
         attempt += 1
         
         # --- ADAPTIVE BRANCHING TRIGGER ---
-        # If we failed 2 times and still have multiple items, branch out
-        if attempt > 2 and len(chunk) > 1:
+        # Branch if Trial 2+ starts and we still have multiple items
+        if attempt >= 2 and len(chunk) > 1:
             worker_logs.append(f"⚠️ [{display_name}] Complexity detected. Branching into 2 sub-parts for fidelity...")
             mid = len(chunk) // 2
             left_chunk = chunk[:mid]
@@ -347,8 +347,8 @@ def extract_chunk_worker(worker_data):
                     data = json.loads(raw_json, strict=False)
                     items = data if isinstance(data, list) else data.get("news_items", [])
                     
-                    # --- YIELD ENFORCEMENT (80%) ---
-                    min_yield = len(chunk) * 0.8
+                    # --- YIELD ENFORCEMENT (95%) ---
+                    min_yield = len(chunk) * 0.95
                     if len(items) < min_yield and attempt < max_attempts:
                         worker_logs.append(f"⚠️ [{display_name}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying...")
                         time.sleep(1)
@@ -362,8 +362,8 @@ def extract_chunk_worker(worker_data):
                     if any(k in err_str for k in ["delimiter", "double quotes", "expecting value", "unterminated"]):
                         salvaged = salvage_json_items(content)
                         if salvaged:
-                            # --- YIELD ENFORCEMENT (SALVAGE) ---
-                            min_yield = len(chunk) * 0.8
+                            # --- YIELD ENFORCEMENT (SALVAGE 95%) ---
+                            min_yield = len(chunk) * 0.95
                             if len(salvaged) < min_yield and attempt < max_attempts:
                                 worker_logs.append(f"⚠️ [{display_name}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
                                 time.sleep(1)
@@ -392,7 +392,7 @@ def extract_chunk_worker(worker_data):
     if last_raw_content:
         salvaged = salvage_json_items(last_raw_content)
         if salvaged:
-            min_yield = len(chunk) * 0.8
+            min_yield = len(chunk) * 0.95
             if len(salvaged) >= min_yield:
                 worker_logs.append(f"🩹 [{display_name}] Emergency Salvage: {len(salvaged)} items.")
                 worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
@@ -510,7 +510,7 @@ if submitted:
             # --- START PARALLEL EXECUTION ---
             from concurrent.futures import ThreadPoolExecutor, as_completed
             max_threads = min(len(chunks), 15)
-            st.info(f"🚀 Starting Parallel Extraction with {max_threads} worker threads...")
+            st.info(f"🚀 Scaling throughput: Initializing {max_threads} worker threads (1 per data chunk)...")
             
             all_extracted_items = []
             completed_count = 0
