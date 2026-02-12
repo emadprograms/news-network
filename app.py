@@ -688,12 +688,16 @@ if st.session_state['data_loaded']:
                 # Flatten hard_data for the table view
                 df_rows = []
                 for it in items:
+                    sentiment = it.get("sentiment_indicated", "N/A")
+                    if isinstance(sentiment, list):
+                        sentiment = ", ".join(filter(None, sentiment)) if sentiment else "N/A"
+                    
                     row = {
                         "Category": it.get("category", "OTHER"),
                         "Primary Entity": it.get("primary_entity", "N/A"),
                         "Summary": it.get("event_summary", "N/A"),
                         "Hard Data": str(it.get("hard_data", {})),
-                        "Sentiment": it.get("sentiment_indicated", "N/A")
+                        "Sentiment": sentiment
                     }
                     df_rows.append(row)
                 
