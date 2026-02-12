@@ -127,17 +127,41 @@ class KeyManager:
              'display': 'Gemini 3 Flash (Free)',
              'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000}
         },
+        'gemini-3-pro-free': {
+             'model_id': 'gemini-3-pro-preview',
+             'tier': 'free',
+             'display': 'Gemini 3 Pro (Free)',
+             'limits': {'rpm': 2, 'tpm': 32000, 'rpd': 50}
+        },
         'gemini-2.5-flash-free': {
              'model_id': 'gemini-2.5-flash',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash (Free)',
              'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000} 
         },
+        'gemini-2.5-pro-free': {
+             'model_id': 'gemini-2.5-pro',
+             'tier': 'free',
+             'display': 'Gemini 2.5 Pro (Free)',
+             'limits': {'rpm': 2, 'tpm': 32000, 'rpd': 50}
+        },
         'gemini-2.5-flash-lite-free': {
              'model_id': 'gemini-2.5-flash-lite',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash Lite (Free)',
              'limits': {'rpm': 10, 'tpm': 250000, 'rpd': 10000}
+        },
+        'gemini-2.0-flash-free': {
+             'model_id': 'gemini-2.0-flash',
+             'tier': 'free',
+             'display': 'Gemini 2.0 Flash (Free)',
+             'limits': {'rpm': 15, 'tpm': 1000000, 'rpd': 1500}
+        },
+        'gemini-2.0-flash-lite-free': {
+             'model_id': 'gemini-2.0-flash-lite',
+             'tier': 'free',
+             'display': 'Gemini 2.0 Flash Lite (Free)',
+             'limits': {'rpm': 30, 'tpm': 1000000, 'rpd': 1500}
         },
         
         # --- GEMMA FAMILY ---
