@@ -229,8 +229,8 @@ The following headlines are present in this chunk. Every single headline must be
 *** STRICT CONSTRAINTS ***
 1. SOURCE TRACKING: For every item you extract, you MUST populate the 'source_headlines' field with the original headlines from the inventory above that were used to build that item.
 2. NO DATA LOSS: Every headline in the inventory must contribute to at least one 'source_headlines' entry in your JSON list.
-3. LOGICAL GROUPING: Use your intelligence to group headlines that describe the same event into ONE 'news_item', but list ALL contributing headlines in 'source_headlines'.
-4. DEDUPLICATION: If a story is a duplicate, still list its headline in the 'source_headlines' of the primary record you create.
+3. STRICT 1:1 EXTRACTION: Do NOT group headlines. Every single headline from the inventory must have its own unique entry in the 'news_items' array.
+4. DEDUPLICATION: If stories are similar, still create separate entries for each unique headline.
 5. NO SYNTHESIS: Focus on facts. Extract numbers, tickers, and entities exactly.
 
 *** OUTPUT FORMAT ***
@@ -440,14 +440,18 @@ def extract_chunk_worker(worker_data):
                     if len(items) > len(best_parsed_items):
                         best_parsed_items = items
                         
-                    # --- YIELD ENFORCEMENT (95%) ---
-                    min_yield = len(chunk) * 0.95
-                    if len(items) < min_yield and attempt < max_attempts:
-                        worker_logs.append(f"⚠️ [{display_name}] Low Yield Check: Only {len(items)}/{len(chunk)} items found. Retrying...")
+                    # --- YIELD ENFORCEMENT (Fidelity-Based) ---
+                    # Count actual headlines recovered rather than item count
+                    missing_now = find_missing_items(chunk, items)
+                    recovered_count = len(chunk) - len(missing_now)
+                    min_req = len(chunk) * 0.95
+                    
+                    if recovered_count < min_req and attempt < max_attempts:
+                        worker_logs.append(f"⚠️ [{display_name}] Low Yield Check: Only {recovered_count}/{len(chunk)} headlines recovered. Retrying...")
                         time.sleep(1)
                         continue 
                         
-                    worker_logs.append(f"✅ [{display_name}] Success! {len(items)} items. (Key: {res.get('key_name', 'Unknown')})")
+                    worker_logs.append(f"✅ [{display_name}] Success! {len(items)} items ({recovered_count}/{len(chunk)} headlines). (Key: {res.get('key_name', 'Unknown')})")
                     return (True, items, worker_logs, api_call_count)
                     
                 except Exception as json_err:
@@ -455,14 +459,15 @@ def extract_chunk_worker(worker_data):
                     if any(k in err_str for k in ["delimiter", "double quotes", "expecting value", "unterminated"]):
                         salvaged = salvage_json_items(content)
                         if salvaged:
-                            # --- YIELD ENFORCEMENT (SALVAGE 95%) ---
-                            min_yield = len(chunk) * 0.95
-                            if len(salvaged) < min_yield and attempt < max_attempts:
-                                worker_logs.append(f"⚠️ [{display_name}] Eager Salvage Rejected: Low yield ({len(salvaged)}/{len(chunk)}). Retrying...")
+                            # --- YIELD ENFORCEMENT (SALVAGE Fidelity-Based) ---
+                            missing_salvage = find_missing_items(chunk, salvaged)
+                            recovered_salvage = len(chunk) - len(missing_salvage)
+                            if recovered_salvage < min_req and attempt < max_attempts:
+                                worker_logs.append(f"⚠️ [{display_name}] Eager Salvage Rejected: Low yield ({recovered_salvage}/{len(chunk)} headlines). Retrying...")
                                 time.sleep(1)
                                 continue 
                                 
-                            worker_logs.append(f"⚡ [{display_name}] Eager Salvage: Recovered {len(salvaged)} items.")
+                            worker_logs.append(f"⚡ [{display_name}] Eager Salvage: Recovered {recovered_salvage}/{len(chunk)} headlines.")
                             worker_logs.append(f"DEBUG_RAW_CONTENT|{content}")
                             worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                             return (True, salvaged, worker_logs, api_call_count)
@@ -485,9 +490,10 @@ def extract_chunk_worker(worker_data):
     if last_raw_content:
         salvaged = salvage_json_items(last_raw_content)
         if salvaged:
-            min_yield = len(chunk) * 0.95
-            if len(salvaged) >= min_yield:
-                worker_logs.append(f"🩹 [{display_name}] Emergency Salvage: {len(salvaged)} items.")
+            missing_final = find_missing_items(chunk, salvaged)
+            recovered_final = len(chunk) - len(missing_final)
+            if recovered_final >= (len(chunk) * 0.95):
+                worker_logs.append(f"🩹 [{display_name}] Emergency Salvage: {recovered_final}/{len(chunk)} headlines.")
                 worker_logs.append(f"DEBUG_RAW_CONTENT|{last_raw_content}")
                 worker_logs.append(f"DEBUG_SALVAGED_ITEMS|{json.dumps(salvaged, indent=2)}")
                 return (True, salvaged, worker_logs, api_call_count)
