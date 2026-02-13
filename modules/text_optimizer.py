@@ -32,13 +32,13 @@ def optimize_json_for_synthesis(json_data: list) -> str:
         optimized_text_lines.append(f"ENTITY: {entity}")
         
         for i, item in enumerate(items, 1):
-            category = item.get('category', 'GENERAL').upper()
-            summary = item.get('event_summary', 'No summary.')
+            category = (item.get('category') or 'GENERAL').upper()
+            summary = item.get('event_summary') or 'No summary.'
             
             # Formatting Hard Data: Flatten dictionary to "Key=Value, Key=Value"
-            hard_data = item.get('hard_data', {})
+            hard_data = item.get('hard_data') or {}
             hard_data_str = ""
-            if hard_data:
+            if isinstance(hard_data, dict) and hard_data:
                 # Filter out nulls and format
                 hd_list = [f"{k}={v}" for k, v in hard_data.items() if v]
                 if hd_list:
