@@ -97,32 +97,47 @@ else:
 
 
 def normalize_text(text):
-    """Global utility for consistent headline matching."""
+    """Global utility for consistent headline matching (keeps spaces)."""
     if not text: return ""
-    # Remove non-alphanumeric, lowercase, and strip
-    return re.sub(r'[^a-zA-Z0-9]', '', str(text)).lower()
+    # Lowercase, remove special chars except spaces
+    return re.sub(r'[^a-z0-9\s]', '', str(text).lower()).strip()
 
 def find_missing_items(chunk, salvaged_items):
     """
     Identifies which original news items are missing from the salvaged list.
-    Uses Cross-Containment logic (normalized substring match).
+    Uses Token-Overlap Comparison (Strict Word Match).
     """
     if not salvaged_items: return chunk
     
-    extracted_headlines = []
+    # Pre-calculate token sets for extracted headlines
+    extracted_sets = []
     for item in salvaged_items:
-        extracted_headlines.extend(item.get('source_headlines', []))
+        for h in item.get('source_headlines', []):
+            norm = normalize_text(h)
+            if norm:
+                extracted_sets.append(set(norm.split()))
     
-    norm_extracted = {normalize_text(h) for h in extracted_headlines}
     missing_items = []
-    
     for item in chunk:
-        h_norm = normalize_text(item.get('title', 'Unknown'))
+        title = item.get('title', 'Unknown')
+        norm_title = normalize_text(title)
+        if not norm_title:
+            missing_items.append(item)
+            continue
+            
+        title_tokens = set(norm_title.split())
         is_found = False
-        for s_norm in norm_extracted:
-            if h_norm == s_norm or h_norm in s_norm or s_norm in h_norm:
+        
+        for e_tokens in extracted_sets:
+            # Use Token Intersection Ratio (Jaccard-ish)
+            # Story is 'found' if at least 85% of its title words are in an extracted headline
+            if not title_tokens: continue
+            intersection = title_tokens.intersection(e_tokens)
+            overlap = len(intersection) / len(title_tokens)
+            if overlap >= 0.85:
                 is_found = True
                 break
+                
         if not is_found:
             missing_items.append(item)
             
@@ -340,7 +355,7 @@ def extract_chunk_worker(worker_data):
             missing_items = find_missing_items(chunk, salvaged_so_far)
             
             if not missing_items:
-                worker_logs.append(f"✅ [{display_name}] Residue Check: All items accounted for in best results!")
+                worker_logs.append(f"✅ [{display_name}] Residue Check: All {len(chunk)} stories accounted for across {len(salvaged_so_far)} items!")
                 return (True, salvaged_so_far, worker_logs, api_call_count)
             
             if len(missing_items) < len(chunk):
