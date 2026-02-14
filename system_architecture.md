@@ -31,9 +31,10 @@ graph TD
 
 ### 2. High-Yield Data Extraction
 - **Zero-Loss Slicing**: Large news items are sliced into multiple parts rather than truncated, ensuring every sentence is processed.
-- **95% Yield Enforcement**: Every extraction trial is validated. If an AI response recovers less than 95% of the input items, the result is discarded and the pipeline triggers a residual retry.
-- **Targeted Residual Extraction**: Instead of retrying an entire failed chunk, the system salvages successful items and identifies the "missing residue." Only the missing items are then sent for a retry, significantly reducing redundant API costs.
-- **Fragment Salvaging**: Uses regex-based patching to recover news items even if the AI response is cut off mid-sentence (e.g., due to max-token limits).
+- **Headline-Based Yield Enforcement**: Yield is calculated based on **Headlines Recovered** (via token-overlap matching) rather than raw item count. This ensures that even if the AI merges stories (which is strictly forbidden), the system correctly identifies missing data.
+- **Strict 1:1 Extraction**: The AI is constrained to create exactly **one JSON object per source headline**, preventing data loss through summarization.
+- **Targeted Residual Extraction**: Instead of retrying an entire failed chunk, the system salvages successful items and identifies the "missing residue" using a robust **Token-Overlap** algorithm (85% similarity). Only the truly missing items are retried.
+- **Robust Salvaging**: Uses a **Balanced-Brace Scanner** to recover complex, nested JSON objects from malformed responses, ensuring that valid data is never discarded due to syntax errors.
 
 ### 3. Intelligence Orchestration (`KeyManager` & `GeminiClient`)
 - **Fatal Error Detection**: Automatically detects "Expired" or "Invalid" API keys and bans them from rotation instantly.

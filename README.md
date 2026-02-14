@@ -1,9 +1,11 @@
-# Grandmaster News Network
+# News Network Analysis Engine
 
- **GRANDMASTER NEWS NETWORK** is a Streamlit-based intelligence feed designed for aggregating and analyzing global news, stocks, and company-specific reports.
+ **NEWS NETWORK ANALYSIS** is a high-fidelity intelligence feed designed for aggregating and analyzing global news, stocks, and company-specific reports. It uses a robust "Salvage-and-Residual" extraction strategy to ensure zero data loss.
 
 ## Features
 
+- **High-Fidelity AI Extraction**: 95% Headline-Based Yield Enforcement with Token-Overlap Verification.
+- **Self-Healing Pipeline**: Automatically detects missing stories and performs targeted residual retries.
 - **Live Intelligence Ticker**: Real-time scrolling headlines.
 - **Time Machine**: Filter news by specific date and time ranges.
 - **Categorized Feeds**: Dedicated tabs for Global/Macro, Stocks, and Company news.
