@@ -16,7 +16,7 @@
 
 ### Prerequisites
 - Python 3.12+
-- Turso Database Credentials (in `.streamlit/secrets.toml`)
+- Infisical Secret Manager credentials (stored in `.streamlit/secrets.toml`)
 
 ### Installation
 
@@ -32,11 +32,12 @@
     ```
 
 ### Configuration
-Ensure your `.streamlit/secrets.toml` contains the necessary Turso database credentials:
+Ensure your `.streamlit/secrets.toml` contains the necessary Infisical credentials to pull database and API secrets:
 ```toml
-[turso_news]
-db_url = "libsql://..."
-auth_token = "..."
+[infisical]
+client_id = "..."
+client_secret = "..."
+project_id = "..."
 ```
 
 ### Running the App
