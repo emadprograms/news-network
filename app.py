@@ -61,7 +61,7 @@ def get_db_connection():
             secret_path="/"
         ).secretValue
 
-        # 2. Key Manager Database (Headed for keys)
+        # --- 2. Key Manager Database (Headed for keys) ---
         km_url = infisical.secrets.get_secret_by_name(
             secret_name="turso_emadprograms_analystworkbench_DB_URL",
             project_id=infisical_secrets["project_id"],

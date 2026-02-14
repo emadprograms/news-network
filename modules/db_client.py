@@ -102,7 +102,7 @@ class NewsDatabase:
 
     def fetch_monitored_tickers(self):
         """
-        Fetches the list of tickers from the 'stocks' table (Analyst DB).
+        Fetches the list of tickers from the 'stocks' table (News Database).
         Expected table schema: stocks(ticker, ...)
         """
         if not self.client: return []
