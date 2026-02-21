@@ -424,6 +424,13 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
         km_url = infisical.secrets.get_secret_by_name(secret_name="turso_emadprograms_analystworkbench_db_url", project_id=inf_project_id, environment_slug="dev", secret_path="/").secretValue
         km_token = infisical.secrets.get_secret_by_name(secret_name="turso_emadprograms_analystworkbench_auth_token", project_id=inf_project_id, environment_slug="dev", secret_path="/").secretValue
 
+        try:
+            inf_webhook = infisical.secrets.get_secret_by_name(secret_name="discord_captain_clean_news_webhook_url", project_id=inf_project_id, environment_slug="dev", secret_path="/").secretValue
+            if inf_webhook and not webhook_url:
+                webhook_url = inf_webhook
+        except Exception:
+            pass
+
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to get keys from Infisical - {e}")
         return
