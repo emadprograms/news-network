@@ -141,21 +141,18 @@ class MarketCalendar:
     def get_session_window(session_date):
         """
         Returns (session_start, session_end) as naive UTC datetimes for a given trading session.
-        - session_start: previous trading day's market close
-        - session_end:   this day's market close
-        Handles early closes, holidays, and DST correctly.
+        - session_start: 1 AM UTC of the day following the previous trading day (post-market close)
+        - session_end:   1 AM UTC of the day following the given session date
         """
         if isinstance(session_date, datetime.datetime):
             session_date = session_date.date()
 
-        # Start: previous trading day's close
+        # Start: previous trading day + 1 day at 1 AM UTC
         prev_day = MarketCalendar.get_prev_trading_day(session_date)
-        prev_close_hour = MarketCalendar.get_market_close_hour_utc(prev_day)
-        start = datetime.datetime(prev_day.year, prev_day.month, prev_day.day, prev_close_hour, 0, 0)
+        start = datetime.datetime(prev_day.year, prev_day.month, prev_day.day, 1, 0, 0) + datetime.timedelta(days=1)
 
-        # End: this day's close
-        close_hour = MarketCalendar.get_market_close_hour_utc(session_date)
-        end = datetime.datetime(session_date.year, session_date.month, session_date.day, close_hour, 0, 0)
+        # End: this day + 1 day at 1 AM UTC
+        end = datetime.datetime(session_date.year, session_date.month, session_date.day, 1, 0, 0) + datetime.timedelta(days=1)
 
         return start, end
 
@@ -163,7 +160,7 @@ class MarketCalendar:
     def get_trading_session_date(dt):
         """
         Maps a UTC datetime to its logical NYSE trading session date.
-        News after market close belongs to the NEXT trading day.
+        The trading session wraps around 1 AM UTC (post-market cutoff).
         """
         if not isinstance(dt, datetime.datetime):
             return dt # Fallback for pure date objects
@@ -174,15 +171,13 @@ class MarketCalendar:
         else:
             dt = dt.astimezone(datetime.timezone.utc)
             
-        today = dt.date()
-        close_hour = MarketCalendar.get_market_close_hour_utc(dt)
+        # Shift back by 1 hour so 1:XX AM falls into the correct logical bucket.
+        # e.g. Tuesday 00:30 AM -> Monday date. Tuesday 01:30 AM -> Tuesday date.
+        logical_date = (dt - datetime.timedelta(hours=1)).date()
         
-        # If today is a trading day, check if it's after close
-        if MarketCalendar.is_trading_day(today):
-            if dt.hour >= close_hour:
-                return MarketCalendar.get_next_trading_day(today)
-            else:
-                return today
+        # If the logical date rests on a non-trading day (weekend/holiday),
+        # it rolls forward to the NEXT trading day's session.
+        if MarketCalendar.is_trading_day(logical_date):
+            return logical_date
         else:
-            # Weekend/Holiday: always belongs to the next trading day
-            return MarketCalendar.get_next_trading_day(today)
+            return MarketCalendar.get_next_trading_day(logical_date)

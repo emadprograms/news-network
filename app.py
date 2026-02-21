@@ -531,10 +531,14 @@ with st.container():
         
         # Cap at current time if session hasn't ended yet
         now_naive = now_utc.replace(tzinfo=None)
-        if session_end > now_naive:
+        if session_start <= now_naive < session_end:
             session_end = now_naive
-        
-        st.caption(f"📅 **{session_label} Session** — Lookback (UTC): {session_start.strftime('%a %b %d, %I:%M %p')} → {session_end.strftime('%a %b %d, %I:%M %p')}")
+            st.caption(f"📅 **{session_label} Session** — Lookback (UTC): {session_start.strftime('%a %b %d, %I:%M %p')} → {session_end.strftime('%a %b %d, %I:%M %p')} (Ongoing)")
+        elif now_naive < session_start:
+            st.caption(f"📅 **{session_label} Session** — Lookback (UTC): {session_start.strftime('%a %b %d, %I:%M %p')} → {session_end.strftime('%a %b %d, %I:%M %p')} (Upcoming)")
+        else:
+            st.caption(f"📅 **{session_label} Session** — Lookback (UTC): {session_start.strftime('%a %b %d, %I:%M %p')} → {session_end.strftime('%a %b %d, %I:%M %p')}")
+
     
     st.divider()
 
