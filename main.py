@@ -450,10 +450,17 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
 
     # 3. Determine Date
     if target_date_str:
-        session_date = datetime.datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        raw_date = datetime.datetime.strptime(target_date_str, "%Y-%m-%d").date()
     else:
         now_utc = datetime.datetime.now(datetime.timezone.utc)
-        session_date = MarketCalendar.get_trading_session_date(now_utc)
+        raw_date = MarketCalendar.get_trading_session_date(now_utc)
+    
+    # Resolve to actual logical trading day (handles weekends/holidays → next trading day)
+    if MarketCalendar.is_trading_day(raw_date):
+        session_date = raw_date
+    else:
+        session_date = MarketCalendar.get_next_trading_day(raw_date)
+        print(f"ℹ️  Input date {raw_date} is not a trading day. Resolved to logical session: {session_date}")
         
     session_start, session_end = MarketCalendar.get_session_window(session_date)
     now_naive = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
