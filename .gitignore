@@ -13,3 +13,6 @@ env/
 
 # OS
 .DS_Store
+
+.env
+
