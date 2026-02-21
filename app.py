@@ -2,6 +2,7 @@ import streamlit as st
 import time
 import datetime
 import re
+from modules.market_utils import MarketCalendar
 from modules.db_client import NewsDatabase
 from modules.key_manager import KeyManager
 from modules.llm_client import GeminiClient
@@ -48,14 +49,14 @@ def get_db_connection():
         
         # 1. News Database (Headed for data)
         news_url = infisical.secrets.get_secret_by_name(
-            secret_name="turso_emadarshadalam_newsdatabase_DB_URL",
+            secret_name="turso_emadarshadalam_newsdatabase_db_url",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
         ).secretValue
         
         news_token = infisical.secrets.get_secret_by_name(
-            secret_name="turso_emadarshadalam_newsdatabase_AUTH_TOKEN",
+            secret_name="turso_emadarshadalam_newsdatabase_auth_token",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
@@ -63,14 +64,14 @@ def get_db_connection():
 
         # --- 2. Key Manager Database (Headed for keys) ---
         km_url = infisical.secrets.get_secret_by_name(
-            secret_name="turso_emadprograms_analystworkbench_DB_URL",
+            secret_name="turso_emadprograms_analystworkbench_db_url",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
         ).secretValue
         
         km_token = infisical.secrets.get_secret_by_name(
-            secret_name="turso_emadprograms_analystworkbench_AUTH_TOKEN",
+            secret_name="turso_emadprograms_analystworkbench_auth_token",
             project_id=infisical_secrets["project_id"],
             environment_slug="dev",
             secret_path="/"
@@ -511,22 +512,34 @@ def extract_chunk_worker(worker_data):
 st.title("📰 News Network Analysis")
 
 # 2. UNIFIED CONTROL PANEL
+now_utc = datetime.datetime.now(datetime.timezone.utc)
+logical_session = MarketCalendar.get_trading_session_date(now_utc)
+
 with st.container():
     st.subheader("🛠️ Analyst Control Panel")
+    st.info(f"🕒 **Current Logical Trading Session:** {logical_session.strftime('%A, %b %d, %Y')}")
     
+    # Trading Session (OUTSIDE form for dynamic updates)
+    st.markdown("**1. Trading Session**")
+    col_s1, col_s2 = st.columns([1, 2])
+    with col_s1:
+        session_date = st.date_input("Session Date", value=logical_session, help="Select the trading day to analyze.")
+    with col_s2:
+        # Auto-compute the lookback window using MarketCalendar
+        session_start, session_end = MarketCalendar.get_session_window(session_date)
+        session_label = MarketCalendar.get_session_label(session_date)
+        
+        # Cap at current time if session hasn't ended yet
+        now_naive = now_utc.replace(tzinfo=None)
+        if session_end > now_naive:
+            session_end = now_naive
+        
+        st.caption(f"📅 **{session_label} Session** — Lookback (UTC): {session_start.strftime('%a %b %d, %I:%M %p')} → {session_end.strftime('%a %b %d, %I:%M %p')}")
+    
+    st.divider()
 
     with st.form("analyst_controls"):
-        # ROW 1: Time Window
-        st.markdown("**1. Select Time Window**")
-        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
-        with col_t1: start_date = st.date_input("From Date", value=datetime.date.today())
-        with col_t2: start_time = st.time_input("From Time", value=datetime.time(0, 0))
-        with col_t3: end_date = st.date_input("To Date", value=datetime.date.today())
-        with col_t4: end_time = st.time_input("To Time", value=datetime.time(23, 59))
-        
-        st.divider()
-
-        # ROW 2: Model & Model Setup
+        # Model Selection
         st.markdown("**2. Select Extraction Model**")
         if km:
              model_options = list(km.MODELS_CONFIG.keys())
@@ -544,6 +557,7 @@ with st.container():
         
         submitted = st.form_submit_button("▶️ START EXTRACTION", type="primary", use_container_width=True)
 
+
 # 3. EXECUTION LOGIC
 if submitted:
     # A. FETCH DATA
@@ -553,9 +567,8 @@ if submitted:
     
     if db:
         with st.spinner("1/3 Fetching Market Data..."):
-             dt_start = datetime.datetime.combine(start_date, start_time)
-             dt_end = datetime.datetime.combine(end_date, end_time)
-             items = db.fetch_news_range(dt_start.isoformat(), dt_end.isoformat())
+             items = db.fetch_news_range(session_start.isoformat(), session_end.isoformat())
+
              
              st.session_state['news_data'] = items
              st.session_state['data_loaded'] = True

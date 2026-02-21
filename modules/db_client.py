@@ -67,6 +67,7 @@ class NewsDatabase:
             eps_estimate TEXT,
             eps_reported TEXT,
             eps_surprise TEXT,
+            trading_session_date TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
@@ -76,6 +77,17 @@ class NewsDatabase:
             self.client.execute("CREATE INDEX IF NOT EXISTS idx_cat_date ON market_news(category, published_at);")
         except Exception as e:
             print(f"❌ Schema Init Error: {e}")
+
+        # Migration: Add trading_session_date column if missing
+        try:
+            self.client.execute("SELECT trading_session_date FROM market_news LIMIT 1")
+        except:
+            print("📦 Migrating Schema: Adding 'trading_session_date' to market_news...")
+            try:
+                self.client.execute("ALTER TABLE market_news ADD COLUMN trading_session_date TEXT")
+                self.client.execute("CREATE INDEX IF NOT EXISTS idx_session_date ON market_news(trading_session_date);")
+            except Exception as e:
+                print(f"⚠️ Schema Migration (trading_session_date) Error: {e}")
 
         # 3. Create Calendar Table
         sql_create_cal = """
@@ -117,7 +129,7 @@ class NewsDatabase:
             print(f"⚠️ Fetch Tickers Error: {e}")
             return []
 
-    def insert_news(self, news_list, category):
+    def insert_news(self, news_list, category, trading_session_date=None):
         """
         Inserts a list of news dictionaries into the DB.
         Returns (inserted_count, duplicate_count)
@@ -128,10 +140,12 @@ class NewsDatabase:
         inserted = 0
         duplicates = 0
         
+        session_str = trading_session_date.strftime("%Y-%m-%d") if trading_session_date else None
+        
         sql = """
         INSERT OR IGNORE INTO market_news 
-        (published_at, title, url, source_domain, publisher, category, content) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (published_at, title, url, source_domain, publisher, category, content, trading_session_date) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         for item in news_list:
@@ -153,7 +167,7 @@ class NewsDatabase:
                     content_str = str(content_list)
 
                 # Execute
-                rs = self.client.execute(sql, [pub_at, title, url, domain, publisher, item_cat, content_str])
+                rs = self.client.execute(sql, [pub_at, title, url, domain, publisher, item_cat, content_str, session_str])
                 
                 # Check if inserted (rows_affected)
                 # Libsql might return rowcount differently, but OR IGNORE usually means 0 rows if dupe
@@ -187,22 +201,22 @@ class NewsDatabase:
             SELECT title, url, content, published_at, source_domain, category, publisher
             FROM market_news 
             WHERE category = ? 
-            AND date(published_at) = ?
+            AND (trading_session_date = ? OR (trading_session_date IS NULL AND date(published_at) = ?))
             AND category != 'HIDDEN'
             AND publisher != 'BLOCKED'
             ORDER BY published_at DESC
             """
-            params = [category, target_date_str]
+            params = [category, target_date_str, target_date_str]
         else:
             sql = """
             SELECT title, url, content, published_at, source_domain, category, publisher
             FROM market_news 
-            WHERE date(published_at) = ?
+            WHERE (trading_session_date = ? OR (trading_session_date IS NULL AND date(published_at) = ?))
             AND category != 'HIDDEN'
             AND publisher != 'BLOCKED'
             ORDER BY published_at DESC
             """
-            params = [target_date_str]
+            params = [target_date_str, target_date_str]
         
         try:
             rs = self.client.execute(sql, params)
@@ -272,10 +286,6 @@ class NewsDatabase:
                 t = row[1]
                 pub_at = row[2]
                 
-                # DEBUG: Trace Raw Rows
-                if "Trump" in t or "trump" in t:
-                     print(f"🕵️ RAW DB ROW: '{t[:30]}...' | Date: {pub_at} | Target: {target_iso}")
-                
                 # Check Date Match (Robust)
                 try:
                     # Try ISO string match First (Fast)
@@ -295,16 +305,44 @@ class NewsDatabase:
                     # improved normalization
                     norm_t = market_utils.normalize_title(t).lower()
                     titles_map[norm_t] = row_id
-                    
-                    # DEBUG: Trace DB Loading
-                    if "trump" in norm_t:
-                        print(f"📂 DB LOAD: '{norm_t}' (ID: {row_id}, DateMatch: {match})")
                 
-            print(f"🔎 DEBUG: DB has {len(titles_map)} existing (normalized) titles for {target_iso}")
             return titles_map
         except Exception as e:
             print(f"⚠️ Fetch Existing Titles Error: {e}")
             return {}
+
+    def fetch_existing_titles_range(self, start_iso, end_iso):
+        """
+        Range-based deduplication: Returns {normalized_title: id} for all articles
+        whose published_at falls between start_iso and end_iso.
+        """
+        if not self.client: return {}
+        try:
+            sql = "SELECT id, title FROM market_news WHERE published_at >= ? AND published_at <= ?"
+            rs = self.client.execute(sql, [start_iso, end_iso])
+            titles_map = {}
+            for row in rs.rows:
+                norm_t = market_utils.normalize_title(row[1]).lower()
+                titles_map[norm_t] = row[0]
+            return titles_map
+        except Exception as e:
+            print(f"⚠️ Fetch Existing Titles (Range) Error: {e}")
+            return {}
+
+    def count_news_range(self, start_iso, end_iso):
+        """
+        Efficiently counts news items between two ISO timestamps.
+        """
+        if not self.client: return 0
+        sql = "SELECT COUNT(id) FROM market_news WHERE published_at >= ? AND published_at <= ?"
+        try:
+            rs = self.client.execute(sql, [start_iso, end_iso])
+            if rs.rows:
+                return rs.rows[0][0]
+            return 0
+        except Exception as e:
+            print(f"⚠️ Count Range Error: {e}")
+            return 0
 
     def fetch_recent_news(self, limit=50):
         """
