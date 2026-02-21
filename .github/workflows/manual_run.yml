@@ -1,0 +1,59 @@
+name: Manual News Network Extraction
+on:
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Target Date (YYYY-MM-DD)'
+        required: false
+        type: string
+      api:
+        description: 'Target API (e.g. gemini)'
+        required: false
+        type: string
+        default: 'gemini'
+      model:
+        description: 'Target Model (e.g. gemini-2.5-flash-lite-free)'
+        required: false
+        type: string
+        default: 'gemini-2.5-flash-lite-free'
+
+jobs:
+  run-extraction:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run News Network Engine
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # Build arguments
+          ARGS=""
+          
+          if [ "${{ github.event.inputs.target_date }}" != "" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.target_date }}"
+          fi
+          
+          if [ "${{ github.event.inputs.api }}" != "" ]; then
+            ARGS="$ARGS --api ${{ github.event.inputs.api }}"
+          fi
+          
+          if [ "${{ github.event.inputs.model }}" != "" ]; then
+            ARGS="$ARGS --model ${{ github.event.inputs.model }}"
+          fi
+          
+          echo "Running: python main.py $ARGS"
+          python main.py $ARGS
