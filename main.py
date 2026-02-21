@@ -622,4 +622,6 @@ if __name__ == "__main__":
         
     print(f"Starting News Extraction: Date={args.date}, API={args.api}, Model={args.model}")
     run_extraction(args.date, args.api, args.model, webhook_url)
-
+    
+    print("🎬 Extraction complete. Shutting down.")
+    os._exit(0)  # 🔒 SAFETY NET: Force-kill to prevent zombie aiohttp/threads from blocking GitHub Actions
