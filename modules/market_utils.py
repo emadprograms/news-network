@@ -147,6 +147,11 @@ class MarketCalendar:
         if isinstance(session_date, datetime.datetime):
             session_date = session_date.date()
 
+        # If the user selects a non-trading day (weekend/holiday),
+        # treat the window as encompassing all time up to the NEXT trading day's close.
+        if not MarketCalendar.is_trading_day(session_date):
+            session_date = MarketCalendar.get_next_trading_day(session_date)
+
         # Start: previous trading day + 1 day at 1 AM UTC
         prev_day = MarketCalendar.get_prev_trading_day(session_date)
         start = datetime.datetime(prev_day.year, prev_day.month, prev_day.day, 1, 0, 0) + datetime.timedelta(days=1)
