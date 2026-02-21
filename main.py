@@ -549,9 +549,17 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
         "description": f"Extraction completed for logical trading day **{session_date}**.",
         "fields": [
             {
+                "name": "🕒 Session Window",
+                "value": (
+                    f"**Session Date:** `{session_date}`\n"
+                    f"**Start:** `{session_start.strftime('%a %b %d, %I:%M %p')} UTC`\n"
+                    f"**End:** `{session_end.strftime('%a %b %d, %I:%M %p')} UTC`"
+                ),
+                "inline": False
+            },
+            {
                 "name": "📊 Extraction Metrics",
                 "value": (
-                    f"**Date:** `{session_date}`\n"
                     f"**Total Articles:** {len(original_headlines)}\n"
                     f"**Fidelity:** `{fidelity_score:.1f}%` ({len(preserved_titles)}/{len(original_headlines)})\n"
                     f"**Extracted Features:** {len(all_extracted_items)}"
