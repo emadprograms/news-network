@@ -15,6 +15,14 @@ GITHUB_TOKEN = os.getenv("GITHUB_PAT")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "emadprograms/news-network")
 WORKFLOW_FILENAME = os.getenv("WORKFLOW_FILENAME", "manual_run.yml")
 
+# Friendly model aliases → actual KeyManager config IDs (free tier only)
+MODEL_ALIASES = {
+    "flash":    "gemini-2.5-flash-free",
+    "lite":     "gemini-2.5-flash-lite-free",
+    "3flash":   "gemini-3-flash-free",
+}
+AVAILABLE_MODELS = list(MODEL_ALIASES.keys())
+
 # Setup intents for message reading
 intents = discord.Intents.default()
 intents.message_content = True
@@ -28,9 +36,20 @@ async def on_ready():
     print('Bot is ready to receive commands.')
 
 @bot.command(name="cleannews")
-async def trigger_fetch(ctx, target_date: str = None, api: str = "gemini", model: str = "gemini-2.5-flash-lite-free"):
+async def trigger_fetch(ctx, target_date: str = None, model: str = "lite"):
     """Triggers the Clean News LLM Extraction workflow. 
-    Usage: !cleannews [YYYY-MM-DD] [api_provider] [model_name]"""
+    Usage: !cleannews [YYYY-MM-DD] [model]
+    Models: flash (2.5 Flash), lite (2.5 Flash Lite), 3 (3 Flash)"""
+    
+    # Resolve friendly model alias
+    resolved_model = MODEL_ALIASES.get(model.lower())
+    if not resolved_model:
+        await ctx.send(
+            f"❌ **Unknown model:** `{model}`\n"
+            f"> Available models: {', '.join([f'`{k}`' for k in AVAILABLE_MODELS])}\n"
+            f"> Example: `!cleannews 2026-02-18 flash`"
+        )
+        return
     
     # 🛡️ Validate date format BEFORE dispatching
     if target_date:
@@ -64,8 +83,7 @@ async def trigger_fetch(ctx, target_date: str = None, api: str = "gemini", model
     status_msg = await ctx.send(
         f"🧠 **Connecting to News Network LLM Engine...**\n"
         f"> **Date:** `{target_date}`\n"
-        f"> **API:** `{api}`\n"
-        f"> **Model:** `{model}`\n"
+        f"> **Model:** `{model}` → `{resolved_model}`\n"
         f"Dispatching signal to GitHub Actions..."
     )
     
@@ -84,10 +102,7 @@ async def trigger_fetch(ctx, target_date: str = None, api: str = "gemini", model
     # Add optional inputs if provided
     if target_date != "today":
         data["inputs"]["target_date"] = target_date
-    if api:
-        data["inputs"]["api"] = api
-    if model:
-        data["inputs"]["model"] = model
+    data["inputs"]["model"] = resolved_model
     
     try:
         async with aiohttp.ClientSession() as session:
