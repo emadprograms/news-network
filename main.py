@@ -369,19 +369,27 @@ async def send_discord_report(webhook_url, summary_text, optimized_text, file_na
     try:
         data = {"embeds": embeds}
         
-        # We need to send both the JSON data and a file (the optimized text)
-        form = aiohttp.FormData()
-        # Ensure we send valid payload JSON as string
-        form.add_field('payload_json', json.dumps(data), content_type='application/json')
-        # Add the optimized text as a file upload
-        form.add_field('file', optimized_text.encode('utf-8'), filename=file_name, content_type='text/plain')
-
         async with aiohttp.ClientSession() as session:
+            # 1. Send the Dashboard Embed first
+            async with session.post(webhook_url, json=data) as response:
+                if response.status not in (200, 204):
+                    print(f"Failed to send dashboard to Discord. Status: {response.status}, text: {await response.text()}")
+                else:
+                    print("✅ Successfully pushed dashboard report to Discord!")
+            
+            # Small delay to guarantee ordering
+            await asyncio.sleep(1)
+            
+            # 2. Send the actual file in a separate message
+            form = aiohttp.FormData()
+            form.add_field('content', "📦 **Distilled Payload Attachment:**")
+            form.add_field('file', optimized_text.encode('utf-8'), filename=file_name, content_type='text/plain')
+            
             async with session.post(webhook_url, data=form) as response:
                 if response.status not in (200, 204):
-                    print(f"Failed to send to Discord. Status: {response.status}, text: {await response.text()}")
+                    print(f"Failed to send file to Discord. Status: {response.status}, text: {await response.text()}")
                 else:
-                    print("✅ Successfully pushed report to Discord!")
+                    print("✅ Successfully pushed payload file to Discord!")
     except Exception as e:
         print(f"Error sending to discord: {e}")
 
