@@ -43,6 +43,8 @@ jobs:
 
       - name: Start VS Code Tunnel
         env:
+          # Unset CI so Gemini CLI runs in full interactive mode (with logo)
+          CI: ""
           # Explicitly clear API keys so Gemini CLI uses the injected OAuth session
           GEMINI_API_KEY: ""
           GOOGLE_API_KEY: ""
