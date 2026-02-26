@@ -25,7 +25,7 @@ jobs:
           cache: 'pip'
 
       - name: Install Python dependencies
-        run: pip install infisical-python-sdk python-dotenv
+        run: pip install infisicalsdk
 
       - name: Inject Gemini Auth (from Infisical)
         env:
