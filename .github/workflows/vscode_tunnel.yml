@@ -43,6 +43,16 @@ jobs:
           }
           EOF
 
+      - name: Interactive Gemini Login
+        env:
+          CI: "false" # Force interactive mode for the login link to appear
+        run: |
+          echo "--------------------------------------------------------"
+          echo "PROMPT: PLEASE AUTHENTICATE YOUR GOOGLE ACCOUNT BELOW"
+          echo "--------------------------------------------------------"
+          # This command will wait until you authorize it on your tablet
+          gemini login
+
       - name: Start VS Code Tunnel
         run: |
           echo "Downloading VS Code CLI..."
