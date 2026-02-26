@@ -18,11 +18,11 @@ jobs:
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
-      # NEW STEP: Pre-configures the CLI for Google Account Login
-      - name: Pre-configure Gemini Auth
+      - name: Configure Terminal for Gemini Auth
         run: |
-          mkdir -p ~/.gemini
-          echo '{"selectedAuthType": "oauth-personal"}' > ~/.gemini/settings.json
+          # Injects the fix into the bash profile so it loads in every new VS Code terminal
+          echo 'unset CI' >> ~/.bashrc
+          echo 'export BROWSER=echo' >> ~/.bashrc
 
       - name: Start VS Code Tunnel
         run: |
