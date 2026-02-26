@@ -10,21 +10,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Sets up a stable Node.js environment for npm
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Installs the official Gemini CLI globally
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
       - name: Start VS Code Tunnel
         run: |
           echo "Downloading VS Code CLI..."
-          curl -sL "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-x64" --output vscode_cli.tar.gz
-          tar -xf vscode_cli.tar.gz
+          # The -fsSL flags ensure we download the actual file, not an error page
+          curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-x64" -o vscode_cli.tar.gz
+          
+          echo "Extracting..."
+          tar -xzf vscode_cli.tar.gz
           
           echo "Starting Tunnel..."
           ./code tunnel --accept-server-license-terms --name news-network-env --install-extension GitHub.github-vscode-theme
