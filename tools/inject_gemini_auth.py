@@ -1,5 +1,4 @@
 import os
-import json
 from infisical_sdk import InfisicalSDKClient
 
 def inject():

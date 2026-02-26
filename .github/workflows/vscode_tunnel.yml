@@ -15,6 +15,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install Gemini CLI
+        run: npm install -g @google/gemini-cli
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -30,9 +33,10 @@ jobs:
           INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
         run: |
-          # 1. Allow interactive terminal behavior
+          # 1. Allow interactive terminal behavior & force OAuth
           echo 'unset CI' >> ~/.bashrc
-          echo 'export GEMINI_MODEL="gemini-3.1-flash-preview"' >> ~/.bashrc
+          echo 'unset GEMINI_API_KEY' >> ~/.bashrc
+          echo 'unset GOOGLE_API_KEY' >> ~/.bashrc
           
           # 2. Fetch and write auth files from Infisical
           python3 tools/inject_gemini_auth.py
