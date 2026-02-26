@@ -15,43 +15,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Gemini CLI
-        run: npm install -g @google/gemini-cli
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
 
-      - name: Configure Terminal for Gemini Auth
+      - name: Install Python dependencies
+        run: pip install infisical-python-sdk python-dotenv
+
+      - name: Inject Gemini Auth (from Infisical)
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
         run: |
-          # 1. Allow interactive terminal behavior (removes CI restriction)
-          # Also unsets API keys to force Google One OAuth
+          # 1. Allow interactive terminal behavior
           echo 'unset CI' >> ~/.bashrc
-          echo 'unset GEMINI_API_KEY' >> ~/.bashrc
-          echo 'unset GOOGLE_API_KEY' >> ~/.bashrc
           echo 'export GEMINI_MODEL="gemini-3.1-flash-preview"' >> ~/.bashrc
           
-          # 2. Configure Gemini CLI to use Google OAuth by default
-          # And set the preferred Pro model in settings
-          mkdir -p ~/.gemini
-          cat << 'EOF' > ~/.gemini/settings.json
-          {
-            "security": {
-              "auth": {
-                "selectedType": "oauth-personal"
-              }
-            },
-            "models": {
-              "default": "gemini-3.1-pro-preview"
-            }
-          }
-          EOF
-
-      - name: Interactive Gemini Login
-        env:
-          CI: "false" # Force interactive mode for the login link to appear
-        run: |
-          echo "--------------------------------------------------------"
-          echo "PROMPT: PLEASE AUTHENTICATE YOUR GOOGLE ACCOUNT BELOW"
-          echo "--------------------------------------------------------"
-          # This command will wait until you authorize it on your tablet
-          gemini login
+          # 2. Fetch and write auth files from Infisical
+          python3 tools/inject_gemini_auth.py
 
       - name: Start VS Code Tunnel
         run: |
