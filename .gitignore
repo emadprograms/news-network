@@ -1,18 +1,26 @@
+# Secrets and Environment
+.env
+.streamlit/secrets.toml
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual Environment
-venv/
-env/
 .venv/
+venv/
+ENV/
 
-# Streamlit
-.streamlit/secrets.toml
+# VS Code / Deployment
+vscode_cli.tar.gz
+code
+.vscode-server/
+*.log
 
-# OS
+# Project specific
+last_email_check.txt
+tools/upload_gemini_secrets.py
+tools/inject_gemini_auth.py
+
+# OS specific
 .DS_Store
-
-.env
-
+Thumbs.db
