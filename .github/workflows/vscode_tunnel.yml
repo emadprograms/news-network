@@ -18,10 +18,15 @@ jobs:
       - name: Install Gemini CLI
         run: npm install -g @google/gemini-cli
 
+      # NEW STEP: Pre-configures the CLI for Google Account Login
+      - name: Pre-configure Gemini Auth
+        run: |
+          mkdir -p ~/.gemini
+          echo '{"selectedAuthType": "oauth-personal"}' > ~/.gemini/settings.json
+
       - name: Start VS Code Tunnel
         run: |
           echo "Downloading VS Code CLI..."
-          # Changed to cli-alpine-x64 to get the universally compatible Linux binary
           curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
           
           echo "Extracting..."
