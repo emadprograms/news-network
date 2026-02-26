@@ -8,6 +8,9 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import aiohttp
 import asyncio
+import imaplib
+from email import message_from_bytes
+import quopri
 
 # Setup paths (ensure imports work)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -203,6 +206,77 @@ def salvage_json_items(text: str) -> list:
                 continue
                 
     return items
+
+def fetch_stock_analysis_email(gmail_user, gmail_pass, session_date):
+    """
+    Connects to Gmail via IMAP, searches for an email from contact@stockanalysis.com
+    on the given session_date, and extracts its content.
+    Returns (content, status_message)
+    """
+    print(f"📧 Searching for Stock Analysis email for session: {session_date}...")
+    try:
+        # 1. Connect and Login
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(gmail_user, gmail_pass)
+        mail.select("inbox")
+
+        # 2. Search for the email (ON date format: DD-Mon-YYYY)
+        search_date = session_date.strftime("%d-%b-%Y")
+        search_query = f'(FROM "contact@stockanalysis.com" ON {search_date})'
+        status, data = mail.search(None, search_query)
+        
+        if status != 'OK' or not data[0]:
+            msg = f"No email from contact@stockanalysis.com found for {search_date}."
+            print(f"⚠️ {msg}")
+            return None, msg
+
+        # 3. Fetch the latest matching email
+        mail_ids = data[0].split()
+        latest_id = mail_ids[-1]
+        status, msg_data = mail.fetch(latest_id, '(RFC822)')
+        
+        if status != 'OK':
+            msg = "Failed to fetch email content from Gmail server."
+            print(f"❌ {msg}")
+            return None, msg
+
+        # 4. Parse the email body
+        raw_email = msg_data[0][1]
+        msg_obj = message_from_bytes(raw_email)
+        
+        body = ""
+        if msg_obj.is_multipart():
+            for part in msg_obj.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                if content_type == "text/plain" and "attachment" not in content_disposition:
+                    payload = part.get_payload(decode=True)
+                    body = payload.decode(errors='ignore')
+                    break
+                elif content_type == "text/html" and "attachment" not in content_disposition:
+                    payload = part.get_payload(decode=True)
+                    body = payload.decode(errors='ignore')
+        else:
+            body = msg_obj.get_payload(decode=True).decode(errors='ignore')
+
+        if "<body" in body or "<div" in body:
+            body = re.sub(r'<style.*?>.*?</style>', '', body, flags=re.DOTALL)
+            body = re.sub(r'<script.*?>.*?</script>', '', body, flags=re.DOTALL)
+            body = re.sub(r'<[^>]+>', '\n', body)
+            body = re.sub(r'\n\s*\n', '\n', body).strip()
+            try:
+                body = quopri.decodestring(body).decode('utf-8', errors='ignore')
+            except:
+                pass
+
+        mail.logout()
+        print(f"✅ Successfully retrieved Stock Analysis email ({len(body)} chars).")
+        return body, "✅ Success"
+
+    except Exception as e:
+        error_msg = f"IMAP Error: {str(e)}"
+        print(f"❌ {error_msg}")
+        return None, error_msg
 
 def extract_chunk_worker_cli(worker_data):
     i_display, chunk, total_chunks, selected_model, depth, ai_client, km = worker_data
@@ -439,6 +513,15 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
         except Exception:
             pass
 
+        # Fetch Gmail Secrets for Stock Analysis Integration
+        try:
+            gmail_user = infisical.secrets.get_secret_by_name(secret_name="arshademad_gmail_address", project_id=inf_project_id, environment_slug="dev", secret_path="/").secretValue
+            gmail_pass = infisical.secrets.get_secret_by_name(secret_name="google_news_network_app_password", project_id=inf_project_id, environment_slug="dev", secret_path="/").secretValue
+        except Exception:
+            gmail_user = None
+            gmail_pass = None
+            print("⚠️ WARNING: Gmail secrets (arshademad_gmail_address, google_news_network_app_password) not found in Infisical. Email integration will be skipped.")
+
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to get keys from Infisical - {e}")
         return
@@ -482,6 +565,12 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
         }]))
         return
 
+    # 4. Email Extraction (Async check for the session date email)
+    stock_analysis_content = None
+    email_status = "Skipped (Secrets Missing)"
+    if gmail_user and gmail_pass:
+        stock_analysis_content, email_status = fetch_stock_analysis_email(gmail_user, gmail_pass, session_date)
+
     preview_text = f"TOTAL NEWS QUANTITY: {len(items)}\n=== START RAW DATA DUMP ===\n\n"
     for idx, item in enumerate(items):
         t = item.get('time', 'N/A')
@@ -517,6 +606,11 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
     print(f"Extraction took {ext_duration:.1f}s, Yielded {len(all_extracted_items)} optimized features.")
     
     optimized_text = optimize_json_for_synthesis(all_extracted_items)
+
+    # Append Stock Analysis Content if found
+    if stock_analysis_content:
+        optimized_text += f"\n\n{'='*40}\nSTOCK ANALYSIS DAILY REPORT: {session_date}\n{'='*40}\n\n{stock_analysis_content}"
+
     opt_tokens = km.estimate_tokens(optimized_text)
     savings_pct = ((raw_input_tokens - opt_tokens) / raw_input_tokens * 100) if raw_input_tokens > 0 else 0
     
@@ -574,6 +668,13 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
                 "inline": True
             },
             {
+                "name": "📧 Email Integration",
+                "value": (
+                    f"**Status:** `{email_status}`"
+                ),
+                "inline": True
+            },
+            {
                 "name": "💻 System Info",
                 "value": (
                     f"**Model Used:** `{target_model}`\n"
@@ -596,6 +697,13 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url):
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }]
     
+    if not stock_analysis_content:
+         embeds.append({
+             "title": f"⚠️ Stock Analysis Integration Failed",
+             "description": f"The daily email for session `{session_date}` could not be retrieved. \n\n**Issue:** {email_status}\n\n*Please check your Gmail inbox and Infisical secrets.*",
+             "color": 16753920 # Orange
+         })
+
     if len(lost_titles) > 0:
          embeds.append({
              "title": f"⚠️ {len(lost_titles)} Missing Items",
