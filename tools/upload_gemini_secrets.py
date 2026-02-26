@@ -1,5 +1,4 @@
 import os
-import json
 from infisical_sdk import InfisicalSDKClient
 from dotenv import load_dotenv
 
@@ -30,8 +29,7 @@ def upload():
                 content = f.read()
                 
             try:
-                # Try to create, if exists it will fail or we can catch it
-                # The SDK might have a specific upsert but let's try get/create/update logic
+                # 1. Try to get the secret
                 try:
                     client.secrets.get_secret_by_name(
                         secret_name=secret_name,
@@ -39,7 +37,7 @@ def upload():
                         environment_slug="dev",
                         secret_path="/"
                     )
-                    # Exists, so update
+                    # If we are here, it exists. Update it.
                     client.secrets.update_secret_by_name(
                         secret_name=secret_name,
                         project_id=project_id,
@@ -47,19 +45,33 @@ def upload():
                         secret_path="/",
                         secret_value=content
                     )
-                    print(f"Updated {secret_name} in Infisical")
-                except:
-                    # Doesn't exist, create
-                    client.secrets.create_secret_by_name(
-                        secret_name=secret_name,
-                        project_id=project_id,
-                        environment_slug="dev",
-                        secret_path="/",
-                        secret_value=content
-                    )
-                    print(f"Created {secret_name} in Infisical")
+                    print(f"✅ Updated {secret_name} in Infisical")
+                except Exception:
+                    # 2. If get fails, it likely doesn't exist. Try to create it.
+                    try:
+                        client.secrets.create_secret_by_name(
+                            secret_name=secret_name,
+                            project_id=project_id,
+                            environment_slug="dev",
+                            secret_path="/",
+                            secret_value=content
+                        )
+                        print(f"✅ Created {secret_name} in Infisical")
+                    except Exception as create_err:
+                        if "already exists" in str(create_err).lower():
+                            # Fallback: manually update if creation failed due to race condition or previous failed get
+                            client.secrets.update_secret_by_name(
+                                secret_name=secret_name,
+                                project_id=project_id,
+                                environment_slug="dev",
+                                secret_path="/",
+                                secret_value=content
+                            )
+                            print(f"✅ Updated {secret_name} (found after failed create) in Infisical")
+                        else:
+                            raise create_err
             except Exception as e:
-                print(f"Error handling {secret_name}: {e}")
+                print(f"❌ Error handling {secret_name}: {e}")
         else:
             print(f"File not found: {file_path}")
 
