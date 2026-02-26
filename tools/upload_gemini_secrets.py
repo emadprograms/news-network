@@ -39,7 +39,7 @@ def upload():
                     )
                     # If we are here, it exists. Update it.
                     client.secrets.update_secret_by_name(
-                        secret_name=secret_name,
+                        current_secret_name=secret_name,
                         project_id=project_id,
                         environment_slug="dev",
                         secret_path="/",
@@ -61,7 +61,7 @@ def upload():
                         if "already exists" in str(create_err).lower():
                             # Fallback: manually update if creation failed due to race condition or previous failed get
                             client.secrets.update_secret_by_name(
-                                secret_name=secret_name,
+                                current_secret_name=secret_name,
                                 project_id=project_id,
                                 environment_slug="dev",
                                 secret_path="/",
