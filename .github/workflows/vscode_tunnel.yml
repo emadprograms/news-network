@@ -21,11 +21,14 @@ jobs:
       - name: Configure Terminal for Gemini Auth
         run: |
           # 1. Allow interactive terminal behavior (removes CI restriction)
+          # Also unsets API keys to force Google One OAuth
           echo 'unset CI' >> ~/.bashrc
+          echo 'unset GEMINI_API_KEY' >> ~/.bashrc
+          echo 'unset GOOGLE_API_KEY' >> ~/.bashrc
+          echo 'export GEMINI_MODEL="gemini-3.1-flash-preview"' >> ~/.bashrc
           
-          # 2. Configure Gemini CLI to use Google OAuth and Flash model by default
-          # This tells the CLI to use Device Authorization when `gemini login` is run
-          # And bypasses the exhausted Pro quota by using the faster Flash model
+          # 2. Configure Gemini CLI to use Google OAuth by default
+          # And set the preferred Pro model in settings
           mkdir -p ~/.gemini
           cat << 'EOF' > ~/.gemini/settings.json
           {
@@ -35,7 +38,7 @@ jobs:
               }
             },
             "models": {
-              "default": "gemini-1.5-pro"
+              "default": "gemini-3.1-pro-preview"
             }
           }
           EOF
