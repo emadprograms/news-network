@@ -16,9 +16,9 @@ jobs:
         with:
           node-version: '20'
 
-      # Installs the Gemini CLI globally
+      # Installs the official Gemini CLI globally
       - name: Install Gemini CLI
-        run: npm install -g @google/generative-ai-cli
+        run: npm install -g @google/gemini-cli
 
       - name: Start VS Code Tunnel
         run: |
