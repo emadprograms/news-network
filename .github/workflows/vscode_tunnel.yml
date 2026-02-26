@@ -20,9 +20,9 @@ jobs:
 
       - name: Configure Terminal for Gemini Auth
         run: |
-          # Injects the fix into the bash profile so it loads in every new VS Code terminal
+          # Allow interactive terminal behavior (removes CI restriction)
+          # This allows `gemini login` to run and provide a Device Authorization link
           echo 'unset CI' >> ~/.bashrc
-          echo 'export BROWSER=echo' >> ~/.bashrc
 
       - name: Start VS Code Tunnel
         run: |
