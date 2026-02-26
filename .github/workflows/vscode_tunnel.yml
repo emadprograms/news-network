@@ -21,8 +21,8 @@ jobs:
       - name: Start VS Code Tunnel
         run: |
           echo "Downloading VS Code CLI..."
-          # The -fsSL flags ensure we download the actual file, not an error page
-          curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-x64" -o vscode_cli.tar.gz
+          # Changed to cli-alpine-x64 to get the universally compatible Linux binary
+          curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
           
           echo "Extracting..."
           tar -xzf vscode_cli.tar.gz
