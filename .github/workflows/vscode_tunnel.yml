@@ -20,9 +20,21 @@ jobs:
 
       - name: Configure Terminal for Gemini Auth
         run: |
-          # Allow interactive terminal behavior (removes CI restriction)
-          # This allows `gemini login` to run and provide a Device Authorization link
+          # 1. Allow interactive terminal behavior (removes CI restriction)
           echo 'unset CI' >> ~/.bashrc
+          
+          # 2. Configure Gemini CLI to use Google OAuth by default
+          # This tells the CLI to use Device Authorization when `gemini login` is run
+          mkdir -p ~/.gemini
+          cat << 'EOF' > ~/.gemini/settings.json
+          {
+            "security": {
+              "auth": {
+                "selectedType": "oauth-personal"
+              }
+            }
+          }
+          EOF
 
       - name: Start VS Code Tunnel
         run: |
