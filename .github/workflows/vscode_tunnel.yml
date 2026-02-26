@@ -42,6 +42,10 @@ jobs:
           python3 tools/inject_gemini_auth.py
 
       - name: Start VS Code Tunnel
+        env:
+          # Explicitly clear API keys so Gemini CLI uses the injected OAuth session
+          GEMINI_API_KEY: ""
+          GOOGLE_API_KEY: ""
         run: |
           echo "Downloading VS Code CLI..."
           curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
