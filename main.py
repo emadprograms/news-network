@@ -468,7 +468,7 @@ async def send_discord_report(webhook_url, summary_text, optimized_text, file_na
         print(f"Error sending to discord: {e}")
 
 
-def run_extraction(target_date_str, api_preference, target_model, webhook_url, mode="extract"):
+def run_extraction(target_date_str, api_preference, target_model, webhook_url):
     print("Initializing Database & Keys via Infisical...")
     
     # 1. Fetch Secrets
@@ -555,35 +555,6 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url, m
 
     items = db.fetch_news_range(session_start.isoformat(), session_end.isoformat())
     print(f"Fetched {len(items)} items.")
-
-    # --- MODE: check_raw ---
-    if mode == "check_raw":
-        print(f"📊 MODE: check_raw -> Reporting article count for {session_date}")
-        embeds = [{
-            "title": f"📊 News Network: Raw Data Audit",
-            "color": 15844367, # Gold
-            "description": f"Audited raw data for logical trading day **{session_date}**.",
-            "fields": [
-                {
-                    "name": "🕒 Session Window",
-                    "value": (
-                        f"**Session Date:** `{session_date}`\n"
-                        f"**Start:** `{session_start.strftime('%a %b %d, %I:%M %p')} UTC`\n"
-                        f"**End:** `{session_end.strftime('%a %b %d, %I:%M %p')} UTC`"
-                    ),
-                    "inline": False
-                },
-                {
-                    "name": "📰 Article Count",
-                    "value": f"**Total Found:** `{len(items)}` articles",
-                    "inline": True
-                }
-            ],
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }]
-        
-        asyncio.run(send_discord_report(webhook_url, f"Audit complete for {session_date}", f"Raw Data Audit: {len(items)} items for {session_date}", f"{session_date}_audit.log", embeds))
-        return
     
     if not items:
         print("No items found. Aborting extraction.")
@@ -747,7 +718,6 @@ def run_extraction(target_date_str, api_preference, target_model, webhook_url, m
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="News Network Extraction Script")
     parser.add_argument("--date", type=str, help="Target session date (YYYY-MM-DD)", default=None)
-    parser.add_argument("--mode", type=str, help="Operation Mode (extract or check_raw)", default="extract")
     parser.add_argument("--api", type=str, help="Target API preference (gemini, deepseek, etc)", default="gemini")
     parser.add_argument("--model", type=str, help="Target Model Config name", default="gemini-2.5-flash-lite-free")
     parser.add_argument("--webhook", type=str, help="Discord Webhook URL", default=None)
@@ -758,8 +728,8 @@ if __name__ == "__main__":
     if not webhook_url:
         print("WARNING: No Discord Webhook URL provided. The log won't be sent.")
         
-    print(f"Starting News Extraction: Date={args.date}, Mode={args.mode}, API={args.api}, Model={args.model}")
-    run_extraction(args.date, args.api, args.model, webhook_url, mode=args.mode)
+    print(f"Starting News Extraction: Date={args.date}, API={args.api}, Model={args.model}")
+    run_extraction(args.date, args.api, args.model, webhook_url)
     
     print("🎬 Extraction complete. Shutting down.")
     os._exit(0)  # 🔒 SAFETY NET: Force-kill to prevent zombie aiohttp/threads from blocking GitHub Actions
