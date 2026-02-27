@@ -6,6 +6,11 @@ on:
         description: 'Target Date (YYYY-MM-DD)'
         required: false
         type: string
+      mode:
+        description: 'Operation Mode (extract or check_raw)'
+        required: false
+        type: string
+        default: 'extract'
       api:
         description: 'Target API (e.g. gemini)'
         required: false
@@ -45,6 +50,10 @@ jobs:
           
           if [ "${{ github.event.inputs.target_date }}" != "" ]; then
             ARGS="$ARGS --date ${{ github.event.inputs.target_date }}"
+          fi
+          
+          if [ "${{ github.event.inputs.mode }}" != "" ]; then
+            ARGS="$ARGS --mode ${{ github.event.inputs.mode }}"
           fi
           
           if [ "${{ github.event.inputs.api }}" != "" ]; then
