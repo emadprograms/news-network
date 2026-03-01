@@ -28,8 +28,23 @@ def optimize_json_for_synthesis(json_data: list) -> str:
     for entity in sorted(entity_groups.keys()):
         items = entity_groups[entity]
         
+        # Determine the entity type and sector from the items
+        # Usually it's consistent across the items in the group, so we grab from the first
+        first_item = items[0]
+        entity_type = (first_item.get('entity_type') or 'COMPANY').upper()
+        sector = first_item.get('sector')
+        
+        # Construct the prefix
+        if entity_type == 'MACRO':
+            prefix = "[MACRO] "
+        else:
+            if sector and sector.lower() != 'null':
+                prefix = f"[COMPANY] [SECTOR:{sector}] "
+            else:
+                prefix = "[COMPANY] "
+                
         # Header for the Entity
-        optimized_text_lines.append(f"ENTITY: {entity}")
+        optimized_text_lines.append(f"ENTITY: {prefix}{entity}")
         
         for i, item in enumerate(items, 1):
             category = (item.get('category') or 'GENERAL').upper()

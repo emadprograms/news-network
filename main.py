@@ -135,6 +135,7 @@ The following headlines are present in this chunk. Every single headline must be
 3. STRICT 1:1 EXTRACTION: Do NOT group headlines. Every single headline from the inventory must have its own unique entry in the 'news_items' array.
 4. DEDUPLICATION: If stories are similar, still create separate entries for each unique headline.
 5. NO SYNTHESIS: Focus on facts. Extract numbers, tickers, and entities exactly.
+6. ENTITY CLASSIFICATION: You must classify the 'primary_entity' as either "MACRO" (e.g. United States, China, Commodities) or "COMPANY" (e.g. AAPL, Meta, Lam Research). If "COMPANY", you must also provide the "sector".
 
 *** OUTPUT FORMAT ***
 Output a valid JSON object with the following schema:
@@ -143,6 +144,8 @@ Output a valid JSON object with the following schema:
     {{
       "category": "String (EARNINGS, MERGERS_ACQUISITIONS, MACRO_ECONOMY, MARKET_MOVEMENTS, GEOPOLITICS, EXECUTIVE_MOVES, OTHER)",
       "primary_entity": "String (Company/Ticker/Country)",
+      "entity_type": "String (STRICTLY 'MACRO' OR 'COMPANY')",
+      "sector": "String (e.g. 'Semiconductors', 'Retail', 'AI' ... or null if MACRO)",
       "secondary_entities": ["Array of Strings"],
       "event_summary": "String (Fact-based summary)",
       "hard_data": {{ "key": "value" }},
