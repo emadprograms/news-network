@@ -24,7 +24,30 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      - name: Install Python dependencies
+        run: pip install infisicalsdk
+
+      - name: Inject Gemini Auth (from Infisical)
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+        run: |
+          # 1. Allow interactive terminal behavior & force OAuth
+          echo 'unset CI' >> ~/.bashrc
+          echo 'unset GEMINI_API_KEY' >> ~/.bashrc
+          echo 'unset GOOGLE_API_KEY' >> ~/.bashrc
+          
+          # 2. Fetch and write auth files from Infisical
+          python3 tools/inject_gemini_auth.py
+
       - name: Start VS Code Tunnel
+        env:
+          # Unset CI so Gemini CLI runs in full interactive mode (with logo)
+          CI: ""
+          # Explicitly clear API keys so Gemini CLI uses the injected OAuth session
+          GEMINI_API_KEY: ""
+          GOOGLE_API_KEY: ""
         run: |
           echo "Downloading VS Code CLI..."
           curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
