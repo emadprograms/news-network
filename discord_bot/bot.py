@@ -18,6 +18,7 @@ WORKFLOW_FILENAME = os.getenv("WORKFLOW_FILENAME", "manual_run.yml")
 # Friendly model aliases → actual KeyManager config IDs (free tier only)
 MODEL_ALIASES = {
     "flash":    "gemini-2.5-flash-free",
+    "2.5lite":  "gemini-2.5-flash-lite-free",
     "lite":     "gemini-3.1-flash-lite-free",
     "3flash":   "gemini-3-flash-free",
 }
@@ -39,7 +40,7 @@ async def on_ready():
 async def trigger_fetch(ctx, target_date: str = None, model: str = "lite"):
     """Triggers the Clean News LLM Extraction workflow. 
     Usage: !cleannews [YYYY-MM-DD] [model]
-    Models: flash (2.5 Flash), lite (3.1 Flash Lite), 3 (3 Flash)"""
+    Models: flash (2.5 Flash), 2.5lite (2.5 Flash Lite), lite (3.1 Flash Lite), 3flash (3 Flash)"""
     
     # Resolve friendly model alias
     resolved_model = MODEL_ALIASES.get(model.lower())
