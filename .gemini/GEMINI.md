@@ -50,6 +50,11 @@ graph TD
 - **Discord Bot** (`discord_bot/bot.py`): Remote trigger via GitHub Actions for serverless, heavy-duty processing.
 - **CLI** (`main.py`): Core engine entry point for scheduled or manual extractions.
 
+### 4. Scheduled Automation
+- **Automated Extraction**: Scheduled to run daily at **8:30 AM Bahrain Time (05:30 UTC)** via GitHub Actions (`.github/workflows/scheduled_run.yml`).
+- **Targeting Logic**: Automatically calculates the **previous trading day** for analysis, ensuring data is processed only after the market has closed.
+- **Holiday Awareness**: Intelligent skip logic for weekends and NYSE holidays to prevent redundant processing.
+
 ## Building and Running
 
 ### Prerequisites
@@ -99,4 +104,4 @@ pytest tests/
 - **Modular Design**: Business logic is abstracted into `modules/`.
 - **Relentless Fidelity**: Always preserve the self-healing and yield enforcement architectures when modifying the AI pipeline.
 - **Secret Security**: All sensitive information must be fetched dynamically at runtime via the `InfisicalSDKClient`. No local persistence of keys.
-- **Infrastructure as Code**: Offload heavy processing to GitHub Actions (`.github/workflows/manual_run.yml`).
+- **Infrastructure as Code**: Offload heavy processing to GitHub Actions (`.github/workflows/manual_run.yml` and `.github/workflows/scheduled_run.yml`).

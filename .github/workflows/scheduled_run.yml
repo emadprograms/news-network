@@ -1,0 +1,67 @@
+name: Scheduled News Network Extraction
+on:
+  schedule:
+    - cron: '30 5 * * 1-5' # 8:30 AM Bahrain Time (GMT+3) -> 5:30 AM UTC, Monday-Friday
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Override Target Date (YYYY-MM-DD)'
+        required: false
+        type: string
+
+jobs:
+  run-extraction:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine Target Date
+        id: date-check
+        run: |
+          TARGET_DATE=$(python3 -c "
+          import datetime
+          import sys
+          import os
+          sys.path.append(os.getcwd())
+          from modules.market_utils import MarketCalendar
+          
+          # 1. Manual Override
+          override = '${{ github.event.inputs.target_date }}'
+          if override:
+              print(override)
+              sys.exit(0)
+              
+          # 2. Automated Logic
+          today = datetime.datetime.now(datetime.timezone.utc).date()
+          
+          # Skip if today is not a trading day (Holiday check)
+          if not MarketCalendar.is_trading_day(today):
+              print('SKIP')
+              sys.exit(0)
+              
+          # Run for the previous trading day
+          prev_trading_day = MarketCalendar.get_prev_trading_day(today)
+          print(prev_trading_day.strftime('%Y-%m-%d'))
+          ")
+          echo "target_date=$TARGET_DATE" >> $GITHUB_OUTPUT
+
+      - name: Run News Network Engine
+        if: steps.date-check.outputs.target_date != 'SKIP'
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          echo "🚀 Running Extraction for: ${{ steps.date-check.outputs.target_date }}"
+          python main.py --date ${{ steps.date-check.outputs.target_date }} --model gemini-3.1-flash-lite-free
