@@ -12,7 +12,7 @@ class GeminiClient:
     def __init__(self, key_manager: KeyManager):
         self.key_manager = key_manager
 
-    def generate_content(self, prompt: str, config_id: str = 'gemini-3-flash-free') -> dict:
+    def generate_content(self, prompt: str, config_id: str = 'gemini-3.1-flash-lite-free') -> dict:
         """
         Generates content using the specified model configuration.
         

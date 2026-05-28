@@ -121,23 +121,35 @@ class KeyManager:
         },
 
         # --- FREE TIER (Standard Limits) ---
+        'gemini-3.5-flash-free': {
+             'model_id': 'gemini-3.5-flash',
+             'tier': 'free',
+             'display': 'Gemini 3.5 Flash (Free)',
+             'limits': {'rpm': 5, 'tpm': 1000000, 'rpd': 20}
+        },
+        'gemini-3.1-flash-lite-free': {
+             'model_id': 'gemini-3.1-flash-lite',
+             'tier': 'free',
+             'display': 'Gemini 3.1 Flash Lite (Free)',
+             'limits': {'rpm': 15, 'tpm': 1000000, 'rpd': 500}
+        },
         'gemini-3-flash-free': {
              'model_id': 'gemini-3-flash-preview',
              'tier': 'free',
              'display': 'Gemini 3 Flash (Free)',
-             'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000}
+             'limits': {'rpm': 5, 'tpm': 1000000, 'rpd': 20}
         },
         'gemini-2.5-flash-free': {
              'model_id': 'gemini-2.5-flash',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash (Free)',
-             'limits': {'rpm': 5, 'tpm': 250000, 'rpd': 10000} 
+             'limits': {'rpm': 5, 'tpm': 1000000, 'rpd': 20} 
         },
         'gemini-2.5-flash-lite-free': {
              'model_id': 'gemini-2.5-flash-lite',
              'tier': 'free',
              'display': 'Gemini 2.5 Flash Lite (Free)',
-             'limits': {'rpm': 10, 'tpm': 250000, 'rpd': 10000}
+             'limits': {'rpm': 10, 'tpm': 1000000, 'rpd': 20}
         },
         
         # --- GEMMA FAMILY ---
@@ -145,13 +157,13 @@ class KeyManager:
             'model_id': 'gemma-3-27b-it',
             'tier': 'free', 
             'display': 'Gemma 3 27B',
-            'limits': {'rpm': 30, 'tpm': 15000, 'rpd': 10000}
+            'limits': {'rpm': 30, 'tpm': 15000, 'rpd': 20}
         },
          'gemma-3-12b': {
             'model_id': 'gemma-3-12b-it',
             'tier': 'free',
             'display': 'Gemma 3 12B',
-            'limits': {'rpm': 30, 'tpm': 15000, 'rpd': 10000}
+            'limits': {'rpm': 30, 'tpm': 15000, 'rpd': 20}
         }
     }
 

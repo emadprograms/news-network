@@ -722,7 +722,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="News Network Extraction Script")
     parser.add_argument("--date", type=str, help="Target session date (YYYY-MM-DD)", default=None)
     parser.add_argument("--api", type=str, help="Target API preference (gemini, deepseek, etc)", default="gemini")
-    parser.add_argument("--model", type=str, help="Target Model Config name", default="gemini-2.5-flash-lite-free")
+    parser.add_argument("--model", type=str, help="Target Model Config name", default="gemini-3.1-flash-lite-free")
     parser.add_argument("--webhook", type=str, help="Discord Webhook URL", default=None)
     
     args = parser.parse_args()

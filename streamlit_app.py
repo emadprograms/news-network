@@ -548,8 +548,8 @@ with st.container():
         if km:
              model_options = list(km.MODELS_CONFIG.keys())
              ix = 0
-             if 'gemini-2.5-flash-lite-free' in model_options:
-                 ix = model_options.index('gemini-2.5-flash-lite-free')
+             if 'gemini-3.1-flash-lite-free' in model_options:
+                 ix = model_options.index('gemini-3.1-flash-lite-free')
              elif 'gemini-2.0-flash-paid' in model_options:
                  ix = model_options.index('gemini-2.0-flash-paid')
              selected_model = st.selectbox("Select Model", options=model_options, index=ix, label_visibility="collapsed")

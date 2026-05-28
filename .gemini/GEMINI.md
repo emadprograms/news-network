@@ -81,7 +81,7 @@ streamlit run streamlit_app.py
 
 **2. Core Extraction Engine (CLI):**
 ```bash
-python main.py --date 2026-02-18 --model gemini-2.5-flash-lite-free
+python main.py --date 2026-02-18 --model gemini-3.1-flash-lite-free
 ```
 
 **3. Discord Bot:**
