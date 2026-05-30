@@ -1,7 +1,13 @@
 name: Dev Environment
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Session duration (e.g. 1h, 30m, 4h)'
+        required: false
+        default: '2h'
+        type: string
 
 jobs:
   dev-env:
@@ -52,11 +58,6 @@ jobs:
           tar -xzf vscode_cli.tar.gz
           
           echo "Starting Tunnel..."
-          timeout ${{ github.event.inputs.duration }} ./code tunnel --accept-server-license-terms --name dev-env \
-            --install-extension GitHub.github-vscode-theme \
-            --install-extension saoudrizwan.claude-devserver-license-terms --name dev-env \
-            --install-extension GitHub.github-vscode-theme \
-            --install-extension saoudrizwan.claude-devserver-license-terms --name dev-env \
-            --install-extension GitHub.github-vscode-theme \
-            --install-extension saoudrizwan.claude-dev      --install-extension GitHub.github-vscode-theme \
+          timeout ${{ github.event.inputs.duration }} ./code tunnel --accept-server-license-terms --name dev-env 
+            --install-extension GitHub.github-vscode-theme 
             --install-extension saoudrizwan.claude-dev
