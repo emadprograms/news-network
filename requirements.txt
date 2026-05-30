@@ -3,4 +3,3 @@ libsql-client
 python-dateutil
 infisicalsdk
 python-dotenv==1.0.1
-requests

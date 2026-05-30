@@ -52,3 +52,6 @@ streamlit run app.py
 - `modules/`: Helper modules (Database client, etc.).
 - `.streamlit/`: Streamlit configuration.
 - `requirements.txt`: Python dependencies.
+
+---
+*Note: This file was modified by Gemini CLI as a demonstration of its file editing capabilities.*
