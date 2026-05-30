@@ -41,6 +41,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_CLI_TRUST_WORKSPACE: "true"
         run: |
+          # Persist env vars for interactive shell sessions in the tunnel
+          echo "export GEMINI_API_KEY='$GEMINI_API_KEY'" >> ~/.bashrc
+          echo "export GEMINI_CLI_TRUST_WORKSPACE='$GEMINI_CLI_TRUST_WORKSPACE'" >> ~/.bashrc
+          
           echo "Downloading VS Code CLI..."
           curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
           
@@ -48,4 +52,6 @@ jobs:
           tar -xzf vscode_cli.tar.gz
           
           echo "Starting Tunnel..."
-          ./code tunnel --accept-server-license-terms --name news-network-env --install-extension GitHub.github-vscode-theme
+          ./code tunnel --accept-server-license-terms --name news-network-env \
+            --install-extension GitHub.github-vscode-theme \
+            --install-extension saoudrizwan.claude-dev

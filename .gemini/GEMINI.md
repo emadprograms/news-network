@@ -105,3 +105,12 @@ pytest tests/
 - **Relentless Fidelity**: Always preserve the self-healing and yield enforcement architectures when modifying the AI pipeline.
 - **Secret Security**: All sensitive information must be fetched dynamically at runtime via the `InfisicalSDKClient`. No local persistence of keys.
 - **Infrastructure as Code**: Offload heavy processing to GitHub Actions (`.github/workflows/manual_run.yml` and `.github/workflows/scheduled_run.yml`).
+
+### Dev Environment (GitHub Actions Tunnel)
+The project provides a pre-configured development environment via `.github/workflows/vscode_tunnel.yml`. 
+- **Setup**: Trigger the `News Network Dev Environment` workflow.
+- **Features**: 
+  - Automatically installs Gemini CLI and essential Python dependencies.
+  - Persists `GEMINI_API_KEY` and `GEMINI_CLI_TRUST_WORKSPACE` in `~/.bashrc` for immediate CLI usage.
+  - Pre-installs the **Cline** extension (`saoudrizwan.claude-dev`) and a specialized theme.
+  - Provides a VS Code tunnel for remote development.
