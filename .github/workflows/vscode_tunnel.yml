@@ -52,7 +52,7 @@ jobs:
           echo "export GEMINI_CLI_TRUST_WORKSPACE='$GEMINI_CLI_TRUST_WORKSPACE'" >> ~/.bashrc
           
           echo "Downloading VS Code CLI..."
-          curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
+          curl -fsSL "https://update.code.visualstudio.com/latest/cli-linux-x64/stable" -o vscode_cli.tar.gz
 
           echo "Extracting..."
           tar -xzf vscode_cli.tar.gz
