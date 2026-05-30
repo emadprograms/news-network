@@ -52,19 +52,12 @@ jobs:
           echo "export GEMINI_CLI_TRUST_WORKSPACE='$GEMINI_CLI_TRUST_WORKSPACE'" >> ~/.bashrc
           
           echo "Downloading VS Code CLI..."
-          curl -L "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-x64" -o vscode_cli.tar.gz
-          
-          echo "Verifying download..."
-          if ! file vscode_cli.tar.gz | grep -q "gzip compressed data"; then
-            echo "Error: Downloaded file is not a gzip archive. Content:"
-            cat vscode_cli.tar.gz
-            exit 1
-          fi
-          
+          curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
+
           echo "Extracting..."
           tar -xzf vscode_cli.tar.gz
-          
+
           echo "Starting Tunnel..."
-          timeout ${{ github.event.inputs.duration }} ./code tunnel --accept-server-license-terms --name dev-env 
-            --install-extension GitHub.github-vscode-theme 
+          timeout ${{ github.event.inputs.duration }} ./code tunnel --accept-server-license-terms --name dev-env \
+            --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev
