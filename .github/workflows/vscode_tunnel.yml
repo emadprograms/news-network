@@ -52,6 +52,6 @@ jobs:
           tar -xzf vscode_cli.tar.gz
           
           echo "Starting Tunnel..."
-          ./code tunnel --accept-server-license-terms --name news-network-env \
+          ./code tunnel --accept-server-license-terms --name dev-env \
             --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev
