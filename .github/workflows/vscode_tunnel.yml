@@ -54,5 +54,7 @@ jobs:
           echo "Starting Tunnel..."
           timeout ${{ github.event.inputs.duration }} ./code tunnel --accept-server-license-terms --name dev-env \
             --install-extension GitHub.github-vscode-theme \
+            --install-extension saoudrizwan.claude-devserver-license-terms --name dev-env \
+            --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev      --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev
