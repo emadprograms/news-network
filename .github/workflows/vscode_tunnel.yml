@@ -1,4 +1,4 @@
-name: News Network Dev Environment
+name: Dev Environment
 
 on:
   workflow_dispatch: 
