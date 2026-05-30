@@ -56,5 +56,7 @@ jobs:
             --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-devserver-license-terms --name dev-env \
             --install-extension GitHub.github-vscode-theme \
+            --install-extension saoudrizwan.claude-devserver-license-terms --name dev-env \
+            --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev      --install-extension GitHub.github-vscode-theme \
             --install-extension saoudrizwan.claude-dev
